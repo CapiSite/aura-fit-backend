@@ -7,19 +7,5 @@ import { UpdateTelegramDto } from './dto/update-telegram.dto';
 export class TelegramController {
   constructor(private readonly telegramService: TelegramService) { }
 
-  @Post('ai')
-  create(@Body() createTelegramDto: CreateTelegramDto) {
-    return this.telegramService.create(createTelegramDto);
-  }
-
-  @Get()
-  findAll() {
-    return this.telegramService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.telegramService.findOne(+id);
-  }
 
 }

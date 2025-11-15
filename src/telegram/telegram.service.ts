@@ -1,26 +1,28 @@
+// telegram.service.ts
 import { Injectable } from '@nestjs/common';
-import { CreateTelegramDto } from './dto/create-telegram.dto';
-import { UpdateTelegramDto } from './dto/update-telegram.dto';
+import TelegramBot from 'node-telegram-bot-api';
+//import { AiService } from '../ai/ai.service';
 
 @Injectable()
 export class TelegramService {
-  create(createTelegramDto: CreateTelegramDto) {
-    return 'This action adds a new telegram';
-  }
+  private bot: TelegramBot;
 
-  findAll() {
-    return `This action returns all telegram`;
-  }
+  constructor() { //private readonly ai: AiService) {
+    this.bot = new TelegramBot(process.env.TELEGTRAM_BOT_TOKEN, {
+      polling: true,
+    });
 
-  findOne(id: number) {
-    return `This action returns a #${id} telegram`;
-  }
+    this.bot.on('message', async (msg) => {
+      const chatId = msg.chat.id;
+      const text = msg.text || '';
 
-  update(id: number, updateTelegramDto: UpdateTelegramDto) {
-    return `This action updates a #${id} telegram`;
-  }
+      // Envia para o Agent da OpenAI
+      //const response = await this.ai.askAgent(text);
+      const response = 'teste';
+      console.log(response);
 
-  remove(id: number) {
-    return `This action removes a #${id} telegram`;
+      // Manda de volta
+      this.bot.sendMessage(chatId, response);
+    });
   }
 }

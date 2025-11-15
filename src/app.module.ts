@@ -1,13 +1,17 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { PrismaModule } from './prisma_connection/prisma.module';
 import { TelegramModule } from './telegram/telegram.module';
+import { GptModule } from './gpt/gpt.module';
 
 @Module({
   imports: [
-    PrismaModule,
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     TelegramModule,
+    GptModule,
   ],
   controllers: [AppController],
   providers: [AppService],
