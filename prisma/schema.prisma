@@ -1,0 +1,10 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // URL do pool (pgbouncer) do Supabase
+  directUrl = env("DIRECT_URL") // URL direta do banco (sem pool), usada para migrações
+}
