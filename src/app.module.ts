@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TelegramModule } from './telegram/telegram.module';
 import { GptModule } from './gpt/gpt.module';
+import { GeminiModule } from './gemini/gemini.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { GptModule } from './gpt/gpt.module';
     }),
     TelegramModule,
     GptModule,
+    GeminiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

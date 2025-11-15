@@ -1,28 +1,46 @@
-// telegram.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
-//import { AiService } from '../ai/ai.service';
 
 @Injectable()
 export class TelegramService {
-  private bot: TelegramBot;
+  private readonly logger = new Logger(TelegramService.name);
+  private readonly bot: TelegramBot;
+  private readonly systemPrompt = 'Voce e a Aura, assistente nutricionista virtual.';
 
-  constructor() { //private readonly ai: AiService) {
-    this.bot = new TelegramBot(process.env.TELEGTRAM_BOT_TOKEN, {
+  constructor(private readonly configService: ConfigService) {
+    const token =
+      this.configService.get<string>('TELEGRAM_BOT_TOKEN')
+      ?? this.configService.get<string>('TELEGTRAM_BOT_TOKEN');
+
+    if (!token) {
+      throw new Error('Telegram bot token is not configured');
+    }
+
+    this.bot = new TelegramBot(token, {
       polling: true,
     });
 
-    this.bot.on('message', async (msg) => {
-      const chatId = msg.chat.id;
-      const text = msg.text || '';
+    this.logger.log('Telegram bot connected and polling for updates');
+  }
 
-      // Envia para o Agent da OpenAI
-      //const response = await this.ai.askAgent(text);
-      const response = 'teste';
-      console.log(response);
-
-      // Manda de volta
-      this.bot.sendMessage(chatId, response);
+  onMessage(listener: (message: TelegramBot.Message, prompt: string) => void) {
+    this.bot.on('message', (message) => {
+      const userText = message.text?.trim() ?? '';
+      const prompt = `${this.systemPrompt}\n\nUsuario: ${userText}`;
+      listener(message, prompt);
     });
+  }
+
+  async sendTypingAction(chatId: number | string) {
+    try {
+      await this.bot.sendChatAction(chatId, 'typing');
+    } catch (error) {
+      this.logger.warn('Failed to send typing action', error as Error);
+    }
+  }
+
+  async sendMessage(chatId: number | string, text: string) {
+    await this.bot.sendMessage(chatId, text);
   }
 }
