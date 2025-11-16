@@ -13,16 +13,7 @@ export class TelegramService {
 
 
   constructor(private readonly configService: ConfigService, @Inject('MESSAGE_INTERCEPTORS') private readonly interceptors: MessageInterceptor[] = []) {
-    const raw =
-      this.configService.get<string>('TELEGRAM_BOT_TOKEN')
-      ?? this.configService.get<string>('TELEGRAM_TOKEN');
-
-    const token = raw?.trim()
-      .replace(/^"|"$/g, '')
-      .replace(/^'|'$/g, '')
-      .replace(/[`\s]/g, '')
-      .replace(/^https?:\/\/api\.telegram\.org\/bot/i, '')
-      .replace(/^bot:/i, '');
+    const token = this.configService.get<string>('telegram.token')?.trim();
 
     if (!token || !/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
       this.logger.error('Invalid Telegram bot token format. Bot disabled.');

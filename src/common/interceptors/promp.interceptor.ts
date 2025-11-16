@@ -5,7 +5,7 @@ import { MessageInterceptor } from 'src/telegram/telegram.service';
 
 @Injectable()
 export class PromptInterceptor implements MessageInterceptor {
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) { }
 
   handle(message: TelegramBot.Message): TelegramBot.Message & { prompt?: string } {
     const base =
@@ -16,7 +16,6 @@ export class PromptInterceptor implements MessageInterceptor {
     if (!text) {
       return message;
     }
-
     const prompt = `${base}\n\nUsuario: ${text}`;
     return { ...message, prompt };
   }

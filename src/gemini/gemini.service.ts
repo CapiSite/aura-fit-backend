@@ -14,15 +14,12 @@ export class GeminiService {
     private readonly configService: ConfigService,
     private readonly telegramService: TelegramService,
   ) {
-    const apiKey =
-      this.configService.get<string>('GEMINI_API_KEY')
-      ?? this.configService.get<string>('GEMNI_API_KEY');
-
+    const apiKey = this.configService.get<string>('gemini.apiKey');
     if (!apiKey) {
       this.logger.warn('GEMINI_API_KEY is not set. Gemini responses are disabled.');
       this.model = null;
     } else {
-      const modelName = this.configService.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
+      const modelName = this.configService.get<string>('gemini.model') ?? 'gemini-2.5-flash';
       const client = new GoogleGenerativeAI(apiKey);
       this.model = client.getGenerativeModel({ model: modelName });
     }
