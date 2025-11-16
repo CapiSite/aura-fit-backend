@@ -28,7 +28,6 @@ export class GeminiService {
     }
 
     this.telegramService.onMessage((message) => {
-      console.log('message' + message);
       void this.handleIncomingMessage(message);
     });
   }
@@ -37,7 +36,7 @@ export class GeminiService {
     return 'This action adds a new gemini';
   }
 
-  private async handleIncomingMessage(message: TelegramBot.Message) {
+  private async handleIncomingMessage(message: TelegramBot.Message & { prompt: string }) {
     const chatId = message.chat.id;
     const text = message.text?.trim();
 
@@ -52,7 +51,7 @@ export class GeminiService {
     }
 
     await this.telegramService.sendTypingAction(chatId);
-    const response = await this.generateResponse(text);
+    const response = await this.generateResponse(message.prompt);
     await this.telegramService.sendMessage(chatId, response);
   }
 
@@ -61,13 +60,30 @@ export class GeminiService {
       return 'O modelo Gemini não está configurado no momento.';
     }
 
-    try {
-      const result = await this.model.generateContent(prompt);
-      const text = result.response.text()?.trim();
-      return text && text.length > 0 ? text : 'Não consegui gerar uma resposta agora.';
-    } catch (error) {
-      this.logger.error('Erro ao gerar resposta no Gemini', error as Error);
-      return 'Tive um problema para falar com o Gemini agora. Tente novamente em instantes.';
+    const maxRetries = 3;
+    const baseDelayMs = 600;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await this.model.generateContent(prompt);
+        const text = result.response.text()?.trim();
+        return text && text.length > 0 ? text : 'Não consegui gerar uma resposta agora.';
+      } catch (error) {
+        const status = (error as any)?.status;
+        if (status === 503 || status === 429) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        if (status === 403) {
+          this.logger.error('Acesso ao Gemini negado (403). Verifique a chave da API e permissões.', error as Error);
+          return 'Configuração de acesso ao Gemini inválida. Verifique a chave da API.';
+        }
+        this.logger.error('Erro ao gerar resposta no Gemini', error as Error);
+        return 'Tive um problema para falar com o Gemini agora. Tente novamente em instantes.';
+      }
     }
+
+    return 'O Gemini está sobrecarregado. Tente novamente em instantes.';
   }
 }

@@ -1,38 +1,70 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
+
+export interface MessageInterceptor {
+  handle(message: TelegramBot.Message): TelegramBot.Message & { prompt?: string };
+}
 
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
-  private readonly bot: TelegramBot;
-  private readonly systemPrompt = 'Voce e a Aura, assistente nutricionista virtual.';
+  private bot: TelegramBot | null = null;
 
-  constructor(private readonly configService: ConfigService) {
-    const token =
+
+  constructor(private readonly configService: ConfigService, @Inject('MESSAGE_INTERCEPTORS') private readonly interceptors: MessageInterceptor[] = []) {
+    const raw =
       this.configService.get<string>('TELEGRAM_BOT_TOKEN')
-      ?? this.configService.get<string>('TELEGTRAM_BOT_TOKEN');
+      ?? this.configService.get<string>('TELEGRAM_TOKEN');
 
-    if (!token) {
-      throw new Error('Telegram bot token is not configured');
+    const token = raw?.trim()
+      .replace(/^"|"$/g, '')
+      .replace(/^'|'$/g, '')
+      .replace(/[`\s]/g, '')
+      .replace(/^https?:\/\/api\.telegram\.org\/bot/i, '')
+      .replace(/^bot:/i, '');
+
+    if (!token || !/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+      this.logger.error('Invalid Telegram bot token format. Bot disabled.');
+      return;
     }
 
-    this.bot = new TelegramBot(token, {
-      polling: true,
+    this.bot = new TelegramBot(token, { polling: true });
+
+    void this.bot.deleteWebHook().catch((err) => {
+      this.logger.warn('Failed to delete webhook', err as Error);
     });
 
-    this.logger.log('Telegram bot connected and polling for updates');
+    this.bot.on('polling_error', (err) => {
+      this.logger.error('Polling error', err as Error);
+    });
+
+    void this.bot.getMe().then((me) => {
+      this.logger.log(`Bot @${me.username} connected and polling for updates`);
+    }).catch((err) => {
+      this.logger.error('Failed to get bot info', err as Error);
+    });
   }
 
-  onMessage(listener: (message: TelegramBot.Message, prompt: string) => void) {
+  onMessage(listener: (message: TelegramBot.Message & { prompt: string }) => void) {
+    if (!this.bot) {
+      this.logger.warn('Telegram bot is disabled; onMessage listener not registered.');
+      return;
+    }
     this.bot.on('message', (message) => {
-      const userText = message.text?.trim() ?? '';
-      const prompt = `${this.systemPrompt}\n\nUsuario: ${userText}`;
-      listener(message, prompt);
+      let current: TelegramBot.Message & { prompt?: string } = message;
+      for (const i of this.interceptors) {
+        current = i.handle(current);
+      }
+      if (!current.prompt) {
+        return;
+      }
+      listener(current as TelegramBot.Message & { prompt: string });
     });
   }
 
   async sendTypingAction(chatId: number | string) {
+    if (!this.bot) return;
     try {
       await this.bot.sendChatAction(chatId, 'typing');
     } catch (error) {
@@ -41,6 +73,8 @@ export class TelegramService {
   }
 
   async sendMessage(chatId: number | string, text: string) {
+    if (!this.bot) return;
     await this.bot.sendMessage(chatId, text);
+    console.log('chat id', chatId)
   }
 }
