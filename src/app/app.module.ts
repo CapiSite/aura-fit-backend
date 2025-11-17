@@ -11,10 +11,12 @@ import { AuthModule } from 'src/auth/auth.module';
 import { UsersModule } from 'src/users/users.module';
 import { WorkoutsModule } from 'src/workouts/workouts.module';
 import { NutritionModule } from 'src/nutrition/nutrition.module';
+import { PrismaModule } from 'src/prisma_connection/prisma.module';
 
 
 @Module({
   imports: [
+    PrismaModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [telegramConfig, geminiConfig],

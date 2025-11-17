@@ -5,5 +5,15 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL") // URL do pool (pgbouncer) do Supabase
-  directUrl = env("DIRECT_URL") // URL direta do banco (sem pool), usada para migrações
+  schemas  = ["aura"] // Esquemas a serem utilizados
+}
+
+model User {
+  chatId      BigInt @id // chatId do Telegram
+  name        String
+  phoneNumber String @unique
+  cpf         String @unique
+
+  @@schema("aura")
+  @@map("user")
 }
