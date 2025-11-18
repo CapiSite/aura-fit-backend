@@ -9,8 +9,7 @@ import { GptModule } from 'src/gpt/gpt.module';
 // import { GeminiModule } from 'src/gemini/gemini.module';
 import { AuthModule } from 'src/auth/auth.module';
 import { UsersModule } from 'src/users/users.module';
-import { WorkoutsModule } from 'src/workouts/workouts.module';
-import { NutritionModule } from 'src/nutrition/nutrition.module';
+
 import { PrismaModule } from 'src/prisma_connection/prisma.module';
 
 
@@ -26,8 +25,6 @@ import { PrismaModule } from 'src/prisma_connection/prisma.module';
     // GeminiModule,
     AuthModule,
     UsersModule,
-    WorkoutsModule,
-    NutritionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

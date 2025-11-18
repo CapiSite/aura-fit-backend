@@ -17,3 +17,48 @@ model User {
   @@schema("aura")
   @@map("user")
 }
+
+// Enum para categorizar os tipos de refeição
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+
+  @@schema("aura")
+}
+
+// Modelo para o perfil detalhado do usuário
+model UserProfile {
+  chatId            BigInt   @id // Chave primária, mesmo ID do chat do Telegram
+  name              String
+  weight            Float? // Peso em kg, opcional
+  height            Float? // Altura em cm, opcional
+  goals             String[] // Array de objetivos, ex: ["PERDER_PESO", "GANHAR_MASSA"]
+  dietaryRestrictions String[] // Array de restrições, ex: ["LACTOSE", "GLUTEN"]
+  preferences       String[] // Array de preferências, ex: ["NAO_GOSTO_DE_VERDURAS"]
+  conversationState String? // Estado atual da conversa, ex: "ASKING_WEIGHT"
+  assistantThreadId String? // thread_id da OpenAI Assistants para manter contexto
+
+  meals Meal[] // Relação com as refeições do usuário
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@schema("aura")
+  @@map("user_profile")
+}
+
+// Modelo para registrar refeições individuais
+model Meal {
+  id            Int      @id @default(autoincrement())
+  userProfileId BigInt
+  userProfile   UserProfile @relation(fields: [userProfileId], references: [chatId])
+
+  content   String
+  mealType  MealType
+  timestamp DateTime @default(now())
+
+  @@schema("aura")
+  @@map("meal")
+}

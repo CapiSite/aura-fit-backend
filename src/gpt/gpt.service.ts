@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import TelegramBot from 'node-telegram-bot-api';
 import { TelegramService } from 'src/telegram/telegram.service';
+import { PrismaService } from 'src/prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
 
@@ -11,12 +12,15 @@ export class GptService {
   private readonly logger = new Logger(GptService.name);
   private readonly client: OpenAI | null;
   private readonly model: string;
+  private readonly assistantId: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly telegramService: TelegramService,
+    private readonly prisma: PrismaService,
   ) {
     const apiKey = this.configService.get<string>('gpt.apiKey')?.trim();
+    this.assistantId = this.configService.get<string>('gpt.assistantId')?.trim() ?? '';
 
     if (!apiKey) {
       this.logger.warn('OPENAI_API_KEY is not set. GPT responses are disabled.');
@@ -70,12 +74,12 @@ export class GptService {
     }
 
     await this.telegramService.sendTypingAction(chatId);
-    const response = await this.generateResponse(message.prompt);
+    const response = await this.generateResponse(message.prompt, chatId);
     await this.telegramService.sendMessage(chatId, response);
   }
 
-  private async generateResponse(prompt: string): Promise<string> {
-    if (!this.client || !this.model) {
+  private async generateResponse(prompt: string, chatId: number): Promise<string> {
+    if (!this.client) {
       return 'O modelo GPT não está configurado no momento.';
     }
 
@@ -84,16 +88,55 @@ export class GptService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const completion = await this.client.chat.completions.create({
-          model: this.model,
-          messages: [{ role: 'user', content: prompt }],
-        });
+        if (this.assistantId) {
+          console.log('GPT Assistants: using assistant', this.assistantId);
+          const profile = await this.prisma.userProfile.findUnique({ where: { chatId: BigInt(chatId) } });
+          let threadId = profile?.assistantThreadId ?? null;
+          if (!threadId) {
+            const created = await this.client.beta.threads.create({});
+            threadId = created.id;
+            console.log('GPT Assistants: thread created', threadId);
+            if (profile) {
+              await this.prisma.userProfile.update({ where: { chatId: BigInt(chatId) }, data: { assistantThreadId: threadId } });
+            }
+          } else {
+            console.log('GPT Assistants: reusing thread', threadId);
+          }
 
-        const choice = completion.choices[0]?.message?.content;
-        const text = typeof choice === 'string' ? choice : choice ?? '';
-        return text && text.trim().length > 0
-          ? text.trim()
-          : 'Não consegui gerar uma resposta agora.';
+          await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
+          const run = await this.client.beta.threads.runs.create(threadId, { assistant_id: this.assistantId });
+          console.log('GPT Assistants: run started', run.id);
+          for (;;) {
+            const current = await (this.client.beta.threads.runs.retrieve as any)(run.id, { thread_id: threadId });
+            console.log('GPT Assistants: run status', current.status);
+            if (current.status === 'completed') break;
+            if (current.status === 'failed' || current.status === 'cancelled' || current.status === 'expired') {
+              throw new Error(`Assistant run ${current.status}`);
+            }
+            await new Promise((r) => setTimeout(r, 800));
+          }
+          const msgs = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 5 });
+          console.log('GPT Assistants: messages fetched', msgs.data.length);
+          const msg = msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
+          const text = (msg?.content ?? [])
+            .map((c: any) => (c.type === 'text' ? c.text.value : ''))
+            .join('\n')
+            .trim();
+          console.log(text);
+          return text && text.length > 0 ? text : 'Não consegui gerar uma resposta agora.';
+        } else {
+          console.log('GPT Chat Completions: using model', this.model);
+          const completion = await this.client.chat.completions.create({
+            model: this.model,
+            messages: [{ role: 'user', content: prompt }],
+          });
+
+          const choice = completion.choices[0]?.message?.content;
+          const text = typeof choice === 'string' ? choice : choice ?? '';
+          return text && text.trim().length > 0
+            ? text.trim()
+            : 'Não consegui gerar uma resposta agora.';
+        }
       } catch (error) {
         const status = (error as any)?.status;
         if (status === 503 || status === 429) {

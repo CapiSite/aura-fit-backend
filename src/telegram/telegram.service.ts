@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
 
 export interface MessageInterceptor {
-  handle(message: TelegramBot.Message): TelegramBot.Message & { prompt?: string };
+  handle(message: TelegramBot.Message): Promise<TelegramBot.Message & { prompt?: string }>;
 }
 
 @Injectable()
@@ -42,10 +42,10 @@ export class TelegramService {
       this.logger.warn('Telegram bot is disabled; onMessage listener not registered.');
       return;
     }
-    this.bot.on('message', (message) => {
+    this.bot.on('message', async (message) => {
       let current: TelegramBot.Message & { prompt?: string } = message;
       for (const i of this.interceptors) {
-        current = i.handle(current);
+        current = await i.handle(current);
       }
       if (!current.prompt) {
         return;
