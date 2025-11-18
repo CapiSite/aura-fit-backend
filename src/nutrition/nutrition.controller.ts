@@ -5,30 +5,6 @@ import { UpdateNutritionDto } from './dto/update-nutrition.dto';
 
 @Controller('nutrition')
 export class NutritionController {
-  constructor(private readonly nutritionService: NutritionService) {}
+  constructor(private readonly nutritionService: NutritionService) { }
 
-  @Post()
-  create(@Body() createNutritionDto: CreateNutritionDto) {
-    return this.nutritionService.create(createNutritionDto);
-  }
-
-  @Get()
-  findAll() {
-    return this.nutritionService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.nutritionService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateNutritionDto: UpdateNutritionDto) {
-    return this.nutritionService.update(+id, updateNutritionDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.nutritionService.remove(+id);
-  }
 }

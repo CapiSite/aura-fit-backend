@@ -36,26 +36,6 @@ export class GptService {
     });
   }
 
-  create(_createGptDto: CreateGptDto) {
-    return 'This action adds a new gpt';
-  }
-
-  findAll() {
-    return `This action returns all gpt`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} gpt`;
-  }
-
-  update(id: number, _updateGptDto: UpdateGptDto) {
-    return `This action updates a #${id} gpt`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} gpt`;
-  }
-
   private async handleIncomingMessage(message: TelegramBot.Message & { prompt: string }) {
     const chatId = message.chat.id;
     const text = message.text?.trim();
@@ -106,7 +86,7 @@ export class GptService {
           await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
           const run = await this.client.beta.threads.runs.create(threadId, { assistant_id: this.assistantId });
           console.log('GPT Assistants: run started', run.id);
-          for (;;) {
+          for (; ;) {
             const current = await (this.client.beta.threads.runs.retrieve as any)(run.id, { thread_id: threadId });
             console.log('GPT Assistants: run status', current.status);
             if (current.status === 'completed') break;
