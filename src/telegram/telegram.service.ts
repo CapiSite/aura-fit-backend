@@ -1,9 +1,12 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
+import { UsersService } from 'src/users/users.service';
 
 export interface MessageInterceptor {
-  handle(message: TelegramBot.Message): Promise<TelegramBot.Message & { prompt?: string }>;
+  handle(
+    message: TelegramBot.Message,
+  ): Promise<TelegramBot.Message & { prompt?: string }>;
 }
 
 @Injectable()
@@ -11,8 +14,12 @@ export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
   private bot: TelegramBot | null = null;
 
-
-  constructor(private readonly configService: ConfigService, @Inject('MESSAGE_INTERCEPTORS') private readonly interceptors: MessageInterceptor[] = []) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService, // Adicionado
+    @Inject('MESSAGE_INTERCEPTORS')
+    private readonly interceptors: MessageInterceptor[] = [],
+  ) {
     const token = this.configService.get<string>('telegram.token')?.trim();
 
     if (!token || !/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
@@ -30,16 +37,25 @@ export class TelegramService {
       this.logger.error('Polling error', err as Error);
     });
 
-    void this.bot.getMe().then((me) => {
-      this.logger.log(`Bot @${me.username} connected and polling for updates`);
-    }).catch((err) => {
-      this.logger.error('Failed to get bot info', err as Error);
-    });
+    void this.bot
+      .getMe()
+      .then((me) => {
+        this.logger.log(
+          `Bot @${me.username} connected and polling for updates`,
+        );
+      })
+      .catch((err) => {
+        this.logger.error('Failed to get bot info', err as Error);
+      });
   }
 
-  onMessage(listener: (message: TelegramBot.Message & { prompt: string }) => void) {
+  onMessage(
+    listener: (message: TelegramBot.Message & { prompt: string }) => void,
+  ) {
     if (!this.bot) {
-      this.logger.warn('Telegram bot is disabled; onMessage listener not registered.');
+      this.logger.warn(
+        'Telegram bot is disabled; onMessage listener not registered.',
+      );
       return;
     }
     this.bot.on('message', async (message) => {
@@ -66,6 +82,6 @@ export class TelegramService {
   async sendMessage(chatId: number | string, text: string) {
     if (!this.bot) return;
     await this.bot.sendMessage(chatId, text);
-    console.log('chat id', chatId)
+    console.log('chat id', chatId);
   }
 }

@@ -6,6 +6,7 @@ import { TelegramService } from 'src/telegram/telegram.service';
 import { PrismaService } from 'src/prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
+import { UsersService } from 'src/users/users.service';
 
 @Injectable()
 export class GptService {
@@ -18,6 +19,7 @@ export class GptService {
     private readonly configService: ConfigService,
     private readonly telegramService: TelegramService,
     private readonly prisma: PrismaService,
+    private readonly usersService: UsersService,
   ) {
     const apiKey = this.configService.get<string>('gpt.apiKey')?.trim();
     this.assistantId = this.configService.get<string>('gpt.assistantId')?.trim() ?? '';
@@ -68,6 +70,8 @@ export class GptService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        let rawText: string;
+
         if (this.assistantId) {
           console.log('GPT Assistants: using assistant', this.assistantId);
           const profile = await this.prisma.userProfile.findUnique({ where: { chatId: BigInt(chatId) } });
@@ -77,7 +81,10 @@ export class GptService {
             threadId = created.id;
             console.log('GPT Assistants: thread created', threadId);
             if (profile) {
-              await this.prisma.userProfile.update({ where: { chatId: BigInt(chatId) }, data: { assistantThreadId: threadId } });
+              await this.prisma.userProfile.update({
+                where: { chatId: BigInt(chatId) },
+                data: { assistantThreadId: threadId },
+              });
             }
           } else {
             console.log('GPT Assistants: reusing thread', threadId);
@@ -86,7 +93,7 @@ export class GptService {
           await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
           const run = await this.client.beta.threads.runs.create(threadId, { assistant_id: this.assistantId });
           console.log('GPT Assistants: run started', run.id);
-          for (; ;) {
+          for (;;) {
             const current = await (this.client.beta.threads.runs.retrieve as any)(run.id, { thread_id: threadId });
             console.log('GPT Assistants: run status', current.status);
             if (current.status === 'completed') break;
@@ -98,12 +105,10 @@ export class GptService {
           const msgs = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 5 });
           console.log('GPT Assistants: messages fetched', msgs.data.length);
           const msg = msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
-          const text = (msg?.content ?? [])
+          rawText = (msg?.content ?? [])
             .map((c: any) => (c.type === 'text' ? c.text.value : ''))
             .join('\n')
             .trim();
-          console.log(text);
-          return text && text.length > 0 ? text : 'Não consegui gerar uma resposta agora.';
         } else {
           console.log('GPT Chat Completions: using model', this.model);
           const completion = await this.client.chat.completions.create({
@@ -112,10 +117,28 @@ export class GptService {
           });
 
           const choice = completion.choices[0]?.message?.content;
-          const text = typeof choice === 'string' ? choice : choice ?? '';
-          return text && text.trim().length > 0
-            ? text.trim()
-            : 'Não consegui gerar uma resposta agora.';
+          rawText = (typeof choice === 'string' ? choice : choice ?? '').trim();
+        }
+
+        if (!rawText) {
+          return 'Não consegui gerar uma resposta agora.';
+        }
+
+        console.log('--- RESPOSTA RECEBIDA DO GPT ---', rawText);
+
+        try {
+          const parsedResponse = JSON.parse(rawText);
+          const { message: responseMessage, user_profile: userProfile } = parsedResponse;
+
+          if (userProfile && Object.keys(userProfile).length > 0) {
+            await this.usersService.updateProfileFromIA(chatId, userProfile);
+            this.logger.log(`Perfil do chat ${chatId} atualizado via IA.`);
+          }
+
+          return responseMessage || 'Recebi uma resposta, mas sem mensagem para exibir.';
+        } catch (jsonError) {
+          // Se não for um JSON válido, retorna o texto como está
+          return rawText;
         }
       } catch (error) {
         const status = (error as any)?.status;

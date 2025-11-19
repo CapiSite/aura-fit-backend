@@ -3,9 +3,10 @@ import { ConfigModule } from '@nestjs/config';
 import { TelegramService } from './telegram.service';
 import { TelegramController } from './telegram.controller';
 import { PromptInterceptor } from 'src/common/interceptors/promp.interceptor';
+import { UsersModule } from 'src/users/users.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, UsersModule],
   controllers: [TelegramController],
   providers: [
     TelegramService,

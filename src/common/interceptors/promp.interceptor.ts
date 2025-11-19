@@ -4,12 +4,14 @@ import TelegramBot from 'node-telegram-bot-api';
 import { MessageInterceptor } from 'src/telegram/telegram.service';
 import { PrismaService } from 'src/prisma_connection/prisma.service';
 import { UserProfile } from '@prisma/client';
+import { UsersService } from 'src/users/users.service';
 
 @Injectable()
 export class PromptInterceptor implements MessageInterceptor {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly usersService: UsersService,
   ) {}
 
   async handle(
@@ -40,7 +42,7 @@ export class PromptInterceptor implements MessageInterceptor {
     }
 
     // 2. Processar a mensagem e atualizar o estado da conversa
-    const updatedProfile = await this.processMessageAndUpdateProfile(
+    const updatedProfile = await this.usersService.processMessageAndUpdateProfile(
       userMessage,
       userProfile,
     );
@@ -51,67 +53,49 @@ export class PromptInterceptor implements MessageInterceptor {
     // 4. Combinar o prompt de sistema com a mensagem do usuário
     const finalPrompt = `${systemPrompt}\n\n[Histórico e Mensagem do Usuário]\n${userMessage}`;
 
+    console.log('--- PROMPT ENVIADO PARA IA ---', finalPrompt);
+
     (message as any).prompt = finalPrompt;
     return message as any;
   }
 
-  private async processMessageAndUpdateProfile(
-    message: string,
-    profile: UserProfile,
-  ): Promise<UserProfile> {
-    let updatedData: Partial<UserProfile> = {};
 
-    // Lógica simples para extrair informações e atualizar o estado
-    // Isso pode ser expandido com regex ou até mesmo uma chamada à IA para extração de entidades
-
-    if (profile.conversationState === 'ASKING_WEIGHT') {
-      const weight = parseFloat(message.replace(',', '.'));
-      if (!isNaN(weight)) {
-        updatedData.weight = weight;
-        updatedData.conversationState = null; // Limpa o estado
-      }
-    } else if (message.toLowerCase().includes('dieta')) {
-      updatedData.conversationState = 'ASKING_GOALS'; // Exemplo de como iniciar um fluxo
-    }
-
-    if (Object.keys(updatedData).length > 0) {
-      return this.prisma.userProfile.update({
-        where: { chatId: profile.chatId },
-        data: updatedData,
-      });
-    }
-
-    return profile;
-  }
 
   private buildSystemPrompt(profile: UserProfile): string {
-    const basePrompt = this.config.get<string>('SYSTEM_PROMPT') ?? 'Você é um assistente prestativo.';
+    // Lida com a serialização de BigInt para JSON, que não é suportado nativamente.
+    const profileJson = JSON.stringify(
+      profile,
+      (key, value) => (typeof value === 'bigint' ? value.toString() : value),
+      2, // Adiciona indentação para melhor legibilidade no prompt
+    );
 
-    const contextParts = [
-      '\n[Contexto do Usuário]',
-      `- Nome: ${profile.name}`,
-      profile.goals.length > 0 ? `- Objetivos: ${profile.goals.join(', ')}` : '',
-      profile.weight ? `- Peso: ${profile.weight} kg` : '',
-      profile.height ? `- Altura: ${profile.height} cm` : '',
-      profile.dietaryRestrictions.length > 0
-        ? `- Restrições Alimentares: ${profile.dietaryRestrictions.join(', ')}`
-        : '',
-      profile.preferences.length > 0
-        ? `- Preferências: ${profile.preferences.join(', ')}`
-        : '',
-    ];
-
-    // Adiciona uma instrução com base no estado da conversa
-    if (profile.conversationState === 'ASKING_GOALS') {
-      contextParts.push(
-        '\n[Instrução Adicional]: Pergunte ao usuário sobre seus objetivos (ganhar, perder ou manter peso) de forma amigável.',
+    // Adiciona instruções dinâmicas com base nos dados faltantes
+    const instructions: string[] = [];
+    if (!profile.weight) {
+      instructions.push('Se for relevante, pergunte o peso do usuário.');
+    }
+    if (!profile.height) {
+      instructions.push('Se for relevante, pergunte a altura do usuário.');
+    }
+    if (profile.goals.length === 0) {
+      instructions.push(
+        'Pergunte sobre os objetivos do usuário (ex: perder peso, ganhar massa muscular).',
       );
-    } else if (!profile.weight) {
-      contextParts.push(
-        '\n[Instrução Adicional]: Se for relevante para a conversa, pergunte o peso do usuário.',
+    }
+    if (!profile.activityLevel) {
+      instructions.push(
+        'Pergunte sobre o nível de atividade física do usuário (sedentário, leve, moderado, etc.).',
       );
     }
 
-    return basePrompt + contextParts.filter(Boolean).join('\n');
+    let systemPrompt = `[Contexto do Usuário em JSON]\n${profileJson}`;
+
+    if (instructions.length > 0) {
+      systemPrompt +=
+        '\n\n[Instruções Adicionais]\n' +
+        instructions.map((inst) => `- ${inst}`).join('\n');
+    }
+
+    return systemPrompt;
   }
 }
