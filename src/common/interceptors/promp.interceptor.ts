@@ -82,7 +82,8 @@ export class PromptInterceptor implements MessageInterceptor {
         'Pergunte sobre os objetivos do usuário (ex: perder peso, ganhar massa muscular).',
       );
     }
-    if (!profile.activityLevel) {
+    const activityLevel = (profile as any).activityLevel;
+    if (!activityLevel) {
       instructions.push(
         'Pergunte sobre o nível de atividade física do usuário (sedentário, leve, moderado, etc.).',
       );
