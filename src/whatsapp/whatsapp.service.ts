@@ -27,6 +27,27 @@ export class WhatsappService {
     };
   }
 
+  /**
+   * Z-API sometimes wraps the messages array inside different envelope keys.
+   * This normalizer keeps the controller contract consistent by always
+   * returning an array to the caller.
+   */
+  private normalizeMessagesResponse(payload: any) {
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+
+    if (Array.isArray(payload?.messages)) {
+      return payload.messages;
+    }
+
+    if (Array.isArray(payload?.data)) {
+      return payload.data;
+    }
+
+    return [];
+  }
+
   private ensureConfigured() {
     if (!this.instanceId || !this.token || !this.clientToken) {
       throw new BadRequestException('Z-API credentials are not configured');
@@ -76,7 +97,8 @@ export class WhatsappService {
       const text = await res.text();
       throw new BadRequestException(text || `Z-API error ${res.status}`);
     }
-    const data = await res.json();
+    const payload = await res.json();
+    const data = this.normalizeMessagesResponse(payload);
     console.log('WhatsApp messages received', {
       phone,
       count: Array.isArray(data) ? data.length : 0,
