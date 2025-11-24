@@ -20,7 +20,7 @@ import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
       isGlobal: true,
       load: [telegramConfig, gptConfig, whatsappConfig],
     }),
-    TelegramModule,
+    //TelegramModule,
     GptModule,
     // GeminiModule,
     AuthModule,

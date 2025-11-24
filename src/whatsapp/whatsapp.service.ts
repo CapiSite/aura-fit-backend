@@ -59,7 +59,7 @@ export class WhatsappService {
     const res = await fetch(`${this.baseUrl}/send-text`, {
       method: 'POST',
       headers: this.headers,
-      body: JSON.stringify({ phone: "5561983522246", message: dto.message }),
+      body: JSON.stringify({ phone: dto.phone, message: dto.message }),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -89,7 +89,7 @@ export class WhatsappService {
 
   async getChatMessages(phone: string): Promise<any> {
     this.ensureConfigured();
-    const res = await fetch(`${this.baseUrl}/chat-messages/5561983522246`, {
+    const res = await fetch(`${this.baseUrl}/chat-messages/${phone}`, {
       method: 'GET',
       headers: this.headers,
     });

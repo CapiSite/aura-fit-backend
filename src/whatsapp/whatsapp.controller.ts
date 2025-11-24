@@ -13,11 +13,19 @@ export class WhatsappController {
 
   @Get('messages/:phone')
   getMessages(@Param('phone') phone: string) {
+    console.log('WhatsApp getMessages request', { phone });
     return this.whatsappService.getChatMessages(phone);
+  }
+
+  @Get('messages')
+  getMessagesDefault() {
+    console.log('WhatsApp getMessages default request');
+    return this.whatsappService.getChatMessages('');
   }
 
   @Get('qr')
   getQr() {
+    console.log('WhatsApp getQr request');
     return this.whatsappService.getQrCodeImage();
   }
 }
