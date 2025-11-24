@@ -59,7 +59,7 @@ export class WhatsappService {
     const res = await fetch(`${this.baseUrl}/send-text`, {
       method: 'POST',
       headers: this.headers,
-      body: JSON.stringify({ phone: dto.phone, message: dto.message }),
+      body: JSON.stringify({ phone: "5561983522246", message: dto.message }),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -89,7 +89,7 @@ export class WhatsappService {
 
   async getChatMessages(phone: string): Promise<any> {
     this.ensureConfigured();
-    const res = await fetch(`${this.baseUrl}/chat-messages/${phone}`, {
+    const res = await fetch(`${this.baseUrl}/chat-messages/5561983522246`, {
       method: 'GET',
       headers: this.headers,
     });
@@ -98,6 +98,7 @@ export class WhatsappService {
       throw new BadRequestException(text || `Z-API error ${res.status}`);
     }
     const payload = await res.json();
+    console.log('Z-API raw response', { phone, payload });
     const data = this.normalizeMessagesResponse(payload);
     console.log('WhatsApp messages received', {
       phone,
