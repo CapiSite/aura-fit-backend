@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
+import { WebhookEventDto } from './dto/webhook-event.dto';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -9,6 +10,7 @@ export class WhatsappService {
   private readonly instanceId: string;
   private readonly token: string;
   private readonly clientToken: string;
+  private readonly webhookMessages = new Map<string, any[]>();
 
   constructor(private readonly configService: ConfigService) {
     this.instanceId = this.configService.get<string>('whatsapp.instanceId') ?? '';
@@ -25,6 +27,10 @@ export class WhatsappService {
       'Content-Type': 'application/json',
       'Client-Token': this.clientToken,
     };
+  }
+
+  private normalizePhone(phone?: string) {
+    return phone?.replace(/[^\d]/g, '') ?? '';
   }
 
   /**
@@ -52,6 +58,39 @@ export class WhatsappService {
     if (!this.instanceId || !this.token || !this.clientToken) {
       throw new BadRequestException('Z-API credentials are not configured');
     }
+  }
+
+  private extractPhoneFromWebhook(payload: WebhookEventDto) {
+    const candidates = [
+      payload?.message?.chatId,
+      payload?.data?.chatId,
+      payload?.body?.chatId,
+      payload?.chatId,
+      payload?.message?.from,
+      payload?.data?.from,
+      payload?.from,
+    ].filter(Boolean) as string[];
+
+    if (!candidates.length) {
+      return '';
+    }
+
+    const cleaned = candidates[0].replace(/@.+$/, '');
+    return this.normalizePhone(cleaned);
+  }
+
+  handleWebhook(payload: WebhookEventDto) {
+    const phone = this.extractPhoneFromWebhook(payload);
+    if (phone) {
+      const historical = this.webhookMessages.get(phone) ?? [];
+      this.webhookMessages.set(phone, [...historical, payload]);
+    }
+    console.log('WhatsApp webhook event received', {
+      phone,
+      type: payload?.type,
+      hasMessage: Boolean(payload?.message),
+    });
+    return { received: true };
   }
 
   async sendText(dto: CreateWhatsappDto): Promise<ZapiSendTextResponse> {
@@ -88,22 +127,12 @@ export class WhatsappService {
   }
 
   async getChatMessages(phone: string): Promise<any> {
-    this.ensureConfigured();
-    const res = await fetch(`${this.baseUrl}/chat-messages/${phone}`, {
-      method: 'GET',
-      headers: this.headers,
+    const normalizedPhone = this.normalizePhone(phone);
+    const cachedMessages = this.webhookMessages.get(normalizedPhone) ?? [];
+    console.log('Serving messages from webhook cache', {
+      phone: normalizedPhone,
+      count: cachedMessages.length,
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new BadRequestException(text || `Z-API error ${res.status}`);
-    }
-    const payload = await res.json();
-    console.log('Z-API raw response', { phone, payload });
-    const data = this.normalizeMessagesResponse(payload);
-    console.log('WhatsApp messages received', {
-      phone,
-      count: Array.isArray(data) ? data.length : 0,
-    });
-    return data;
+    return cachedMessages;
   }
 }

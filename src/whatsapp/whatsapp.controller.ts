@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
+import { WebhookEventDto } from './dto/webhook-event.dto';
 
 @Controller('whatsapp')
 export class WhatsappController {
@@ -11,16 +12,10 @@ export class WhatsappController {
     return this.whatsappService.sendText(createWhatsappDto);
   }
 
-  @Get('messages/:phone')
-  getMessages(@Param('phone') phone: string) {
-    console.log('WhatsApp getMessages request', { phone });
-    return this.whatsappService.getChatMessages(phone);
-  }
-
-  @Get('messages')
-  getMessagesDefault() {
-    console.log('WhatsApp getMessages default request');
-    return this.whatsappService.getChatMessages('');
+  @Post('webhook')
+  handleWebhook(@Body() payload: WebhookEventDto) {
+    console.log('WhatsApp webhook received');
+    return this.whatsappService.handleWebhook(payload);
   }
 
   @Get('qr')
