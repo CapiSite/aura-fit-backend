@@ -15,6 +15,7 @@ export class WhatsappController {
   @Post('webhook')
   handleWebhook(@Body() payload: WebhookEventDto) {
     console.log('WhatsApp webhook received');
+    console.log('WhatsApp webhook payload', payload);
     return this.whatsappService.handleWebhook(payload);
   }
 
