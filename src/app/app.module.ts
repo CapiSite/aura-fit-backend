@@ -21,7 +21,7 @@ import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
       load: [telegramConfig, gptConfig, whatsappConfig],
     }),
     //TelegramModule,
-    //GptModule,
+    GptModule,
     // GeminiModule,
     AuthModule,
     UsersModule,

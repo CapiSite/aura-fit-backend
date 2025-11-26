@@ -60,7 +60,7 @@ export class GptService {
     await this.telegramService.sendMessage(chatId, response);
   }
 
-  private async generateResponse(prompt: string, chatId: number): Promise<string> {
+  public async generateResponse(prompt: string, chatId: number | string): Promise<string> {
     if (!this.client) {
       return 'O modelo GPT não está configurado no momento.';
     }
@@ -93,7 +93,7 @@ export class GptService {
           await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
           const run = await this.client.beta.threads.runs.create(threadId, { assistant_id: this.assistantId });
           console.log('GPT Assistants: run started', run.id);
-          for (;;) {
+          for (; ;) {
             const current = await (this.client.beta.threads.runs.retrieve as any)(run.id, { thread_id: threadId });
             console.log('GPT Assistants: run status', current.status);
             if (current.status === 'completed') break;
@@ -131,7 +131,14 @@ export class GptService {
           const { message: responseMessage, user_profile: userProfile } = parsedResponse;
 
           if (userProfile && Object.keys(userProfile).length > 0) {
-            await this.usersService.updateProfileFromIA(chatId, userProfile);
+            // Ensure chatId is treated as BigInt for Prisma, but UsersService might expect number.
+            // If UsersService expects number, we might lose precision for very large IDs if not careful.
+            // However, existing code used number. Let's try to pass it as is if it fits, or update UsersService.
+            // For now, let's cast to any to bypass TS check if we are confident runtime handles it,
+            // or better, let's update UsersService later.
+            // But to be safe with current signature:
+            const numericChatId = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
+            await this.usersService.updateProfileFromIA(numericChatId, userProfile);
             this.logger.log(`Perfil do chat ${chatId} atualizado via IA.`);
           }
 

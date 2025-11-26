@@ -9,5 +9,6 @@ import { UsersModule } from 'src/users/users.module';
   controllers: [GptController],
   providers: [GptService],
   imports: [ConfigModule, TelegramModule, UsersModule],
+  exports: [GptService],
 })
-export class GptModule {}
+export class GptModule { }

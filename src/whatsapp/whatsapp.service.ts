@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
+import { GptService } from 'src/gpt/gpt.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -12,7 +13,10 @@ export class WhatsappService {
   private readonly clientToken: string;
   private readonly webhookMessages = new Map<string, any[]>();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly gptService: GptService,
+  ) {
     this.instanceId = this.configService.get<string>('whatsapp.instanceId') ?? '';
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
     this.clientToken = this.configService.get<string>('whatsapp.clientToken') ?? '';
@@ -69,6 +73,7 @@ export class WhatsappService {
       payload?.message?.from,
       payload?.data?.from,
       payload?.from,
+      payload?.phone,
     ].filter(Boolean) as string[];
 
     if (!candidates.length) {
@@ -79,11 +84,34 @@ export class WhatsappService {
     return this.normalizePhone(cleaned);
   }
 
-  handleWebhook(payload: WebhookEventDto) {
+  async handleWebhook(payload: WebhookEventDto) {
     const phone = this.extractPhoneFromWebhook(payload);
     if (phone) {
       const historical = this.webhookMessages.get(phone) ?? [];
       this.webhookMessages.set(phone, [...historical, payload]);
+    }
+    console.log('WhatsApp webhook event received', {
+      phone,
+      type: payload?.type,
+      hasMessage: Boolean(payload?.message),
+    });
+
+    // Check if it is a text message from user
+    const textMessage = payload?.message?.text?.message || payload?.text?.message;
+    const isFromMe = payload?.message?.fromMe || payload?.fromMe;
+
+    if (phone && textMessage && !isFromMe) {
+      if (phone !== '556183522246') {
+        console.log(`Ignoring message from unauthorized phone: ${phone}`);
+        return { received: true };
+      }
+      console.log(`Received message from ${phone}: ${textMessage}`);
+      try {
+        const response = await this.gptService.generateResponse(textMessage, phone);
+        await this.sendText({ phone, message: response });
+      } catch (error) {
+        console.error('Error generating GPT response for WhatsApp:', error);
+      }
     }
 
     return { received: true };
