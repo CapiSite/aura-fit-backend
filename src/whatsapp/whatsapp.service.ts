@@ -85,11 +85,7 @@ export class WhatsappService {
       const historical = this.webhookMessages.get(phone) ?? [];
       this.webhookMessages.set(phone, [...historical, payload]);
     }
-    console.log('WhatsApp webhook event received', {
-      phone,
-      type: payload?.type,
-      hasMessage: Boolean(payload?.message),
-    });
+
     return { received: true };
   }
 

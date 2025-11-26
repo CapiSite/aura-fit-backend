@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
@@ -14,8 +14,8 @@ export class WhatsappController {
 
   @Post('webhook')
   handleWebhook(@Body() payload: WebhookEventDto) {
-    console.log('WhatsApp webhook received');
-    console.log('WhatsApp webhook payload', payload);
+
+    console.log('WhatsApp webhook payload', payload)
     return this.whatsappService.handleWebhook(payload);
   }
 

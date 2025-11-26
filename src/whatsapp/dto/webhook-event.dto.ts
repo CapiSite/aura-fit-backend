@@ -21,5 +21,25 @@ export class WebhookEventDto {
   @IsObject()
   body?: Record<string, any>;
 
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  chatId?: string;
+
+  @IsOptional()
+  @IsString()
+  messageId?: string;
+
+  @IsOptional()
+  @IsObject()
+  text?: Record<string, any>;
+
   [key: string]: any;
 }
