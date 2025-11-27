@@ -72,24 +72,24 @@ export class PromptInterceptor implements MessageInterceptor {
     // Adiciona instruções dinâmicas com base nos dados faltantes
     const instructions: string[] = [];
     if (!profile.weight) {
-      instructions.push('Se for relevante, pergunte o peso do usuário.');
+      instructions.push('Se for relevante, pergunte o peso do usuário. Sempre atualize utilizando o updateUserProfile.');
     }
     if (!profile.height) {
-      instructions.push('Se for relevante, pergunte a altura do usuário.');
+      instructions.push('Se for relevante, pergunte a altura do usuário. Sempre atualize utilizando o updateUserProfile.');
     }
     if (profile.goals.length === 0) {
       instructions.push(
-        'Pergunte sobre os objetivos do usuário (ex: perder peso, ganhar massa muscular).',
+        'Pergunte sobre os objetivos do usuário (ex: perder peso, ganhar massa muscular). Sempre atualize utilizando o updateUserProfile.',
       );
     }
     const activityLevel = (profile as any).activityLevel;
     if (!activityLevel) {
       instructions.push(
-        'Pergunte sobre o nível de atividade física do usuário (sedentário, leve, moderado, etc.).',
+        'Pergunte sobre o nível de atividade física do usuário (sedentário, leve, moderado, etc.). Sempre atualize utilizando o updateUserProfile.',
       );
     }
 
-    let systemPrompt = `[Contexto do Usuário em JSON]\n${profileJson}`;
+    let systemPrompt = `[Contexto do Usuário em JSON]\n${profileJson}\n**SEMPRE** Utilize a updateUserProfile para atualizar o perfil do usuário.`;
 
     if (instructions.length > 0) {
       systemPrompt +=

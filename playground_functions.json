@@ -1,0 +1,54 @@
+[
+  {
+    "name": "getUserProfile",
+    "description": "Obtém o perfil completo de um usuário com base no ID do chat do Telegram.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "chatId": {
+          "type": "number",
+          "description": "O ID do chat do Telegram do usuário."
+        }
+      },
+      "required": [
+        "chatId"
+      ]
+    }
+  },
+  {
+    "name": "updateUserProfile",
+    "description": "Atualiza o perfil do usuário com informações como peso, altura, objetivos, restrições, etc.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "number", "description": "O ID do chat do Telegram do usuário." },
+        "name": { "type": "string", "description": "Nome do usuário" },
+        "weight": { "type": "number", "description": "Peso em kg" },
+        "height": { "type": "number", "description": "Altura em cm" },
+        "activityLevel": { "type": "string", "description": "Nível de atividade (SEDENTARIO, LEVE, MODERADO, INTENSO, MUITO_INTENSO)" },
+        "workType": { "type": "string", "description": "Tipo de trabalho" },
+        "goals": { "type": "array", "items": { "type": "string" }, "description": "Lista de objetivos" },
+        "dietaryRestrictions": { "type": "array", "items": { "type": "string" }, "description": "Restrições alimentares" },
+        "preferences": { "type": "array", "items": { "type": "string" }, "description": "Preferências alimentares" },
+        "allergies": { "type": "array", "items": { "type": "string" }, "description": "Alergias" },
+        "medicalConditions": { "type": "array", "items": { "type": "string" }, "description": "Condições médicas" },
+        "medications": { "type": "array", "items": { "type": "string" }, "description": "Medicamentos em uso" },
+        "usualMealsPerDay": { "type": "number", "description": "Número de refeições por dia" },
+        "wakeTime": { "type": "string", "description": "Horário de acordar (HH:MM)" },
+        "sleepTime": { "type": "string", "description": "Horário de dormir (HH:MM)" },
+        "planStyle": { "type": "string", "description": "Estilo do plano alimentar" }
+      },
+      "required": [
+        "chatId"
+      ]
+    }
+  },
+  {
+    "name": "echo",
+    "description": "Retorna os argumentos recebidos",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]

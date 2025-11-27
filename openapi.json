@@ -1,0 +1,192 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Aura Fit MCP API",
+    "description": "API for Aura Fit MCP Tools",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://YOUR_NGROK_URL.ngrok-free.app/mcp"
+    }
+  ],
+  "paths": {
+    "/tools/getUserProfile/call": {
+      "post": {
+        "description": "Obtém o perfil completo de um usuário com base no ID do chat do Telegram.",
+        "operationId": "getUserProfile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chatId": {
+                    "type": "number",
+                    "description": "O ID do chat do Telegram do usuário."
+                  }
+                },
+                "required": [
+                  "chatId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/updateUserProfile/call": {
+      "post": {
+        "description": "Atualiza o perfil do usuário com informações como peso, altura, objetivos, restrições, etc.",
+        "operationId": "updateUserProfile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chatId": { "type": "number", "description": "O ID do chat do Telegram do usuário." },
+                  "name": { "type": "string", "description": "Nome do usuário" },
+                  "weight": { "type": "number", "description": "Peso em kg" },
+                  "height": { "type": "number", "description": "Altura em cm" },
+                  "activityLevel": { "type": "string", "description": "Nível de atividade" },
+                  "workType": { "type": "string", "description": "Tipo de trabalho" },
+                  "goals": { "type": "array", "items": { "type": "string" }, "description": "Lista de objetivos" },
+                  "dietaryRestrictions": { "type": "array", "items": { "type": "string" }, "description": "Restrições alimentares" },
+                  "preferences": { "type": "array", "items": { "type": "string" }, "description": "Preferências alimentares" },
+                  "allergies": { "type": "array", "items": { "type": "string" }, "description": "Alergias" },
+                  "medicalConditions": { "type": "array", "items": { "type": "string" }, "description": "Condições médicas" },
+                  "medications": { "type": "array", "items": { "type": "string" }, "description": "Medicamentos em uso" },
+                  "usualMealsPerDay": { "type": "number", "description": "Número de refeições por dia" },
+                  "wakeTime": { "type": "string", "description": "Horário de acordar (HH:MM)" },
+                  "sleepTime": { "type": "string", "description": "Horário de dormir (HH:MM)" },
+                  "planStyle": { "type": "string", "description": "Estilo do plano alimentar" }
+                },
+                "required": [
+                  "chatId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/echo/call": {
+      "post": {
+        "description": "Retorna os argumentos recebidos",
+        "operationId": "echo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/time/call": {
+      "post": {
+        "description": "Retorna a data e hora atual ISO",
+        "operationId": "time",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "now": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/sum/call": {
+      "post": {
+        "description": "Soma números do array values",
+        "operationId": "sum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "values"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

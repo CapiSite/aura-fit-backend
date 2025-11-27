@@ -1,0 +1,31 @@
+{
+  "tools": [
+    {
+      "name": "getUserProfile",
+      "description": "Obtém o perfil completo de um usuário com base no ID do chat do Telegram.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "number",
+            "description": "O ID do chat do Telegram do usuário."
+          }
+        },
+        "required": ["chatId"]
+      }
+    },
+    { "name": "echo", "description": "Retorna os argumentos recebidos" },
+    { "name": "time", "description": "Retorna a data e hora atual ISO" },
+    {
+      "name": "sum",
+      "description": "Soma números do array \"values\"",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "values": { "type": "array", "items": { "type": "number" } }
+        },
+        "required": ["values"]
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import { PrismaService } from 'src/prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
 import { UsersService } from 'src/users/users.service';
+import { McpService } from 'src/mcp/mcp.service';
 
 @Injectable()
 export class GptService {
@@ -20,6 +21,7 @@ export class GptService {
     private readonly telegramService: TelegramService,
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
+    private readonly mcpService: McpService,
   ) {
     const apiKey = this.configService.get<string>('gpt.apiKey')?.trim();
     this.assistantId = this.configService.get<string>('gpt.assistantId')?.trim() ?? '';
@@ -91,17 +93,53 @@ export class GptService {
           }
 
           await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
-          const run = await this.client.beta.threads.runs.create(threadId, { assistant_id: this.assistantId });
+
+          const run = await this.client.beta.threads.runs.create(threadId, {
+            assistant_id: this.assistantId,
+            tools: this.mcpService.getTools().map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parametersSchema } })) as any,
+          });
+
           console.log('GPT Assistants: run started', run.id);
-          for (; ;) {
-            const current = await (this.client.beta.threads.runs.retrieve as any)(run.id, { thread_id: threadId });
-            console.log('GPT Assistants: run status', current.status);
-            if (current.status === 'completed') break;
-            if (current.status === 'failed' || current.status === 'cancelled' || current.status === 'expired') {
-              throw new Error(`Assistant run ${current.status}`);
+
+          for (;;) {
+            const currentRun = await this.client.beta.threads.runs.retrieve(run.id, { thread_id: threadId});
+
+            if (['completed', 'failed', 'cancelled', 'expired'].includes(currentRun.status)) {
+              console.log('GPT Assistants: run status', currentRun.status);
+              if (currentRun.status !== 'completed') {
+                throw new Error(`Assistant run ${currentRun.status}`);
+              }
+              break;
             }
+
+            if (currentRun.status === 'requires_action') {
+              console.log('GPT Assistants: run requires action');
+              const toolCalls = currentRun.required_action?.submit_tool_outputs.tool_calls ?? [];
+              const toolOutputs: { tool_call_id: string; output: string }[] = [];
+
+              for (const toolCall of toolCalls) {
+                const functionName = toolCall.function.name;
+                const args = JSON.parse(toolCall.function.arguments);
+
+                console.log(`-> Calling tool: ${functionName} with args:`, args);
+                const output = await this.mcpService.callTool(functionName, args);
+
+                toolOutputs.push({
+                  tool_call_id: toolCall.id,
+                  output: JSON.stringify(output),
+                });
+              }
+
+              await this.client.beta.threads.runs.submitToolOutputs(run.id, {
+                thread_id: threadId,
+                tool_outputs: toolOutputs,
+              });
+              console.log('GPT Assistants: tool outputs submitted');
+            }
+
             await new Promise((r) => setTimeout(r, 800));
           }
+
           const msgs = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 5 });
           console.log('GPT Assistants: messages fetched', msgs.data.length);
           const msg = msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
