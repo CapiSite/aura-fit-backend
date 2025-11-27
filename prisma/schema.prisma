@@ -4,21 +4,13 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL") // URL do pool (pgbouncer) do Supabase
-  schemas  = ["aura"] // Esquemas a serem utilizados
+  schemas  = ["aura"]
 }
 
-model User {
-  chatId      BigInt @id // chatId do Telegram
-  name        String
-  phoneNumber String @unique
-  cpf         String @unique
+/* -------------------------------------------------------
+   Enums
+------------------------------------------------------- */
 
-  @@map("user")
-  @@schema("aura")
-}
-
-// Enum para categorizar os tipos de refeição
 enum MealType {
   BREAKFAST
   LUNCH
@@ -28,64 +20,97 @@ enum MealType {
   @@schema("aura")
 }
 
-// Modelo para o perfil detalhado do usuário
-model UserProfile {
-  chatId BigInt @id // Chave primária, mesmo ID do chat do Telegram
-  name   String
+enum PlanStyle {
+  BALANCEADO
+  LOW_CARB
+  HIGH_PROTEIN
+  VEGANO
+  VEGETARIANO
+  MEDITERRANEO
 
-  //dados físicos
-  weight Float? // Peso em kg, opcional
-  height Float? // Altura em cm, opcional
+  @@schema("aura")
+}
+
+enum SubscriptionPlan {
+  FREE
+  PLUS
+  PRO
+
+  @@schema("aura")
+}
+
+/* -------------------------------------------------------
+   User Profile (dados detalhados)
+------------------------------------------------------- */
+
+model UserProfile {
+  chatId String @id
+  name   String
+  cpf    String @unique
+
+  // Dados físicos
+  weight Float?
+  height Float?
 
   // Estilo de vida
-  activityLevel String? // "SEDENTARIO", "LEVE", "MODERADO", etc
-  workType      String? // "ESCRITORIO", "MANUAL", "TURNOS"...
+  activityLevel String?
+  workType      String?
 
-  // Objetivos
-  goals               String[] // Array de objetivos, ex: ["PERDER_PESO", "GANHAR_MASSA"]
-  dietaryRestrictions String[] // Array de restrições, ex: ["LACTOSE", "GLUTEN"]
-  preferences         String[] // Array de preferências, ex: ["NAO_GOSTO_DE_VERDURAS"]
+  // Objetivos e restrições
+  goals               String[]
+  dietaryRestrictions String[]
+  preferences         String[]
+  allergies           String[]
+  medicalConditions   String[]
+  medications         String[]
 
-  // Restrições mais sérias
-  allergies         String[] // ["AMENDOIM", "CAMARAO"]
-  medicalConditions String[] // ["DIABETES_TIPO_2", "HIPERTENSAO"]
-  medications       String[] // opcional, mas útil para nutricionista real
+  // Rotina
+  usualMealsPerDay Int?
+  wakeTime         String?
+  sleepTime        String?
+  timezone         String?
 
-  // Rotina de refeições
-  usualMealsPerDay Int? // quantas refeições costuma fazer
-  wakeTime         String? // "06:30"
-  sleepTime        String? // "23:00"
-  timezone         String? // "America/Sao_Paulo"
-
-  // Aderência e configuração de plano
-  caloricTarget Int? // kcal/dia
-  proteinTarget Int? // g/dia
+  // Plano nutricional
+  caloricTarget Int?
+  proteinTarget Int?
   carbTarget    Int?
   fatTarget     Int?
-  planStyle     String? // "LOW_CARB", "BALANCEADO", "VEGANO" etc
+  planStyle     PlanStyle?
 
-  //conversa
-  assistantThreadId String? // thread_id da OpenAI Assistants para manter contexto
+  // IA / Assistente
+  assistantThreadId String?
 
-  // Meta
+  // Metas e histórico básico
   lastCheckInAt DateTime?
   lastWeighInAt DateTime?
-  notes         String? // observações gerais do nutricionista ou da própria IA
+  notes         String?
 
-  meals Meal[] // Relação com as refeições do usuário
+  // Assinatura / planos
+  subscriptionPlan      SubscriptionPlan @default(FREE)
+  subscriptionExpiresAt DateTime?
+  isPaymentActive       Boolean @default(false)
+  lastPaymentAt         DateTime?
+  nextBillingAt         DateTime?
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  // Relações
+  meals          Meal[]
   userMetricLogs UserMetricLog[]
+  payments       Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("user_profile")
   @@schema("aura")
 }
 
-// Modelo para registrar refeições individuais
+/* -------------------------------------------------------
+   Registro de refeições
+------------------------------------------------------- */
+
 model Meal {
-  id            Int         @id @default(autoincrement())
-  userProfileId BigInt
+  id            Int @id @default(autoincrement())
+  userProfileId String
   userProfile   UserProfile @relation(fields: [userProfileId], references: [chatId])
 
   content   String
@@ -96,17 +121,40 @@ model Meal {
   @@schema("aura")
 }
 
+/* -------------------------------------------------------
+   Logs de métricas físicas
+------------------------------------------------------- */
+
 model UserMetricLog {
-  id     Int         @id @default(autoincrement())
-  chatId BigInt
+  id     Int @id @default(autoincrement())
+  chatId String
   user   UserProfile @relation(fields: [chatId], references: [chatId])
 
   loggedAt DateTime @default(now())
-  weight   Float? // kg
-  bodyFat  Float? // % de gordura corporal, se tiver
-  waist    Float? // cm, cintura
-  hip      Float? // cm, quadril
+  weight   Float?
+  bodyFat  Float?
+  waist    Float?
+  hip      Float?
 
   @@map("user_metric_log")
+  @@schema("aura")
+}
+
+/* -------------------------------------------------------
+   Histórico de pagamentos
+------------------------------------------------------- */
+
+model Payment {
+  id        Int @id @default(autoincrement())
+  chatId    String
+  user      UserProfile @relation(fields: [chatId], references: [chatId])
+
+  amount Float
+  plan   SubscriptionPlan
+  status String       // "PAID", "FAILED", "REFUNDED"
+  method String?      // PIX, CARTAO, etc
+  paidAt DateTime @default(now())
+
+  @@map("payment")
   @@schema("aura")
 }

@@ -17,7 +17,7 @@ export class PromptInterceptor implements MessageInterceptor {
   async handle(
     message: TelegramBot.Message,
   ): Promise<TelegramBot.Message & { prompt?: string }> {
-    const chatId = message.chat.id;
+    const chatId = String(message.chat.id);
     const userMessage = message.text?.trim() ?? '';
 
     if (!userMessage) {
@@ -33,19 +33,24 @@ export class PromptInterceptor implements MessageInterceptor {
       userProfile = await this.prisma.userProfile.create({
         data: {
           chatId,
+          cpf: chatId, // Using chatId as temporary CPF until user provides real one
           name: message.from?.first_name ?? 'Usuário',
           goals: [],
           dietaryRestrictions: [],
           preferences: [],
+          allergies: [],
+          medicalConditions: [],
+          medications: [],
         },
       });
     }
 
     // 2. Processar a mensagem e atualizar o estado da conversa
-    const updatedProfile = await this.usersService.processMessageAndUpdateProfile(
-      userMessage,
-      userProfile,
-    );
+    const updatedProfile =
+      await this.usersService.processMessageAndUpdateProfile(
+        userMessage,
+        userProfile,
+      );
 
     // 3. Construir o prompt de sistema com base no perfil atualizado
     const systemPrompt = this.buildSystemPrompt(updatedProfile);
@@ -59,8 +64,6 @@ export class PromptInterceptor implements MessageInterceptor {
     return message as any;
   }
 
-
-
   private buildSystemPrompt(profile: UserProfile): string {
     // Lida com a serialização de BigInt para JSON, que não é suportado nativamente.
     const profileJson = JSON.stringify(
@@ -72,10 +75,14 @@ export class PromptInterceptor implements MessageInterceptor {
     // Adiciona instruções dinâmicas com base nos dados faltantes
     const instructions: string[] = [];
     if (!profile.weight) {
-      instructions.push('Se for relevante, pergunte o peso do usuário. Sempre atualize utilizando o updateUserProfile.');
+      instructions.push(
+        'Se for relevante, pergunte o peso do usuário. Sempre atualize utilizando o updateUserProfile.',
+      );
     }
     if (!profile.height) {
-      instructions.push('Se for relevante, pergunte a altura do usuário. Sempre atualize utilizando o updateUserProfile.');
+      instructions.push(
+        'Se for relevante, pergunte a altura do usuário. Sempre atualize utilizando o updateUserProfile.',
+      );
     }
     if (profile.goals.length === 0) {
       instructions.push(

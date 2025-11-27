@@ -24,10 +24,13 @@ export class GptService {
     private readonly mcpService: McpService,
   ) {
     const apiKey = this.configService.get<string>('gpt.apiKey')?.trim();
-    this.assistantId = this.configService.get<string>('gpt.assistantId')?.trim() ?? '';
+    this.assistantId =
+      this.configService.get<string>('gpt.assistantId')?.trim() ?? '';
 
     if (!apiKey) {
-      this.logger.warn('OPENAI_API_KEY is not set. GPT responses are disabled.');
+      this.logger.warn(
+        'OPENAI_API_KEY is not set. GPT responses are disabled.',
+      );
       this.client = null;
       this.model = '';
     } else {
@@ -40,7 +43,9 @@ export class GptService {
     });
   }
 
-  private async handleIncomingMessage(message: TelegramBot.Message & { prompt: string }) {
+  private async handleIncomingMessage(
+    message: TelegramBot.Message & { prompt: string },
+  ) {
     const chatId = message.chat.id;
     const text = message.text?.trim();
 
@@ -62,7 +67,10 @@ export class GptService {
     await this.telegramService.sendMessage(chatId, response);
   }
 
-  public async generateResponse(prompt: string, chatId: number | string): Promise<string> {
+  public async generateResponse(
+    prompt: string,
+    chatId: number | string,
+  ): Promise<string> {
     if (!this.client) {
       return 'O modelo GPT não está configurado no momento.';
     }
@@ -76,7 +84,9 @@ export class GptService {
 
         if (this.assistantId) {
           console.log('GPT Assistants: using assistant', this.assistantId);
-          const profile = await this.prisma.userProfile.findUnique({ where: { chatId: BigInt(chatId) } });
+          const profile = await this.prisma.userProfile.findUnique({
+            where: { chatId: String(chatId) },
+          });
           let threadId = profile?.assistantThreadId ?? null;
           if (!threadId) {
             const created = await this.client.beta.threads.create({});
@@ -84,7 +94,7 @@ export class GptService {
             console.log('GPT Assistants: thread created', threadId);
             if (profile) {
               await this.prisma.userProfile.update({
-                where: { chatId: BigInt(chatId) },
+                where: { chatId: String(chatId) },
                 data: { assistantThreadId: threadId },
               });
             }
@@ -92,19 +102,38 @@ export class GptService {
             console.log('GPT Assistants: reusing thread', threadId);
           }
 
-          await this.client.beta.threads.messages.create(threadId, { role: 'user', content: prompt });
+          await this.client.beta.threads.messages.create(threadId, {
+            role: 'user',
+            content: prompt,
+          });
 
           const run = await this.client.beta.threads.runs.create(threadId, {
             assistant_id: this.assistantId,
-            tools: this.mcpService.getTools().map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parametersSchema } })) as any,
+            tools: this.mcpService
+              .getTools()
+              .map((t) => ({
+                type: 'function',
+                function: {
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.parametersSchema,
+                },
+              })) as any,
           });
 
           console.log('GPT Assistants: run started', run.id);
 
           for (;;) {
-            const currentRun = await this.client.beta.threads.runs.retrieve(run.id, { thread_id: threadId});
+            const currentRun = await this.client.beta.threads.runs.retrieve(
+              run.id,
+              { thread_id: threadId },
+            );
 
-            if (['completed', 'failed', 'cancelled', 'expired'].includes(currentRun.status)) {
+            if (
+              ['completed', 'failed', 'cancelled', 'expired'].includes(
+                currentRun.status,
+              )
+            ) {
               console.log('GPT Assistants: run status', currentRun.status);
               if (currentRun.status !== 'completed') {
                 throw new Error(`Assistant run ${currentRun.status}`);
@@ -114,15 +143,24 @@ export class GptService {
 
             if (currentRun.status === 'requires_action') {
               console.log('GPT Assistants: run requires action');
-              const toolCalls = currentRun.required_action?.submit_tool_outputs.tool_calls ?? [];
-              const toolOutputs: { tool_call_id: string; output: string }[] = [];
+              const toolCalls =
+                currentRun.required_action?.submit_tool_outputs.tool_calls ??
+                [];
+              const toolOutputs: { tool_call_id: string; output: string }[] =
+                [];
 
               for (const toolCall of toolCalls) {
                 const functionName = toolCall.function.name;
                 const args = JSON.parse(toolCall.function.arguments);
 
-                console.log(`-> Calling tool: ${functionName} with args:`, args);
-                const output = await this.mcpService.callTool(functionName, args);
+                console.log(
+                  `-> Calling tool: ${functionName} with args:`,
+                  args,
+                );
+                const output = await this.mcpService.callTool(
+                  functionName,
+                  args,
+                );
 
                 toolOutputs.push({
                   tool_call_id: toolCall.id,
@@ -140,9 +178,13 @@ export class GptService {
             await new Promise((r) => setTimeout(r, 800));
           }
 
-          const msgs = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 5 });
+          const msgs = await this.client.beta.threads.messages.list(threadId, {
+            order: 'desc',
+            limit: 5,
+          });
           console.log('GPT Assistants: messages fetched', msgs.data.length);
-          const msg = msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
+          const msg =
+            msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
           rawText = (msg?.content ?? [])
             .map((c: any) => (c.type === 'text' ? c.text.value : ''))
             .join('\n')
@@ -155,7 +197,9 @@ export class GptService {
           });
 
           const choice = completion.choices[0]?.message?.content;
-          rawText = (typeof choice === 'string' ? choice : choice ?? '').trim();
+          rawText = (
+            typeof choice === 'string' ? choice : (choice ?? '')
+          ).trim();
         }
 
         if (!rawText) {
@@ -166,21 +210,23 @@ export class GptService {
 
         try {
           const parsedResponse = JSON.parse(rawText);
-          const { message: responseMessage, user_profile: userProfile } = parsedResponse;
+          const { message: responseMessage, user_profile: userProfile } =
+            parsedResponse;
 
           if (userProfile && Object.keys(userProfile).length > 0) {
-            // Ensure chatId is treated as BigInt for Prisma, but UsersService might expect number.
-            // If UsersService expects number, we might lose precision for very large IDs if not careful.
-            // However, existing code used number. Let's try to pass it as is if it fits, or update UsersService.
-            // For now, let's cast to any to bypass TS check if we are confident runtime handles it,
-            // or better, let's update UsersService later.
-            // But to be safe with current signature:
-            const numericChatId = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
-            await this.usersService.updateProfileFromIA(numericChatId, userProfile);
+            // Convert chatId to string for Prisma 7 compatibility
+            const stringChatId = String(chatId);
+            await this.usersService.updateProfileFromIA(
+              stringChatId,
+              userProfile,
+            );
             this.logger.log(`Perfil do chat ${chatId} atualizado via IA.`);
           }
 
-          return responseMessage || 'Recebi uma resposta, mas sem mensagem para exibir.';
+          return (
+            responseMessage ||
+            'Recebi uma resposta, mas sem mensagem para exibir.'
+          );
         } catch (jsonError) {
           // Se não for um JSON válido, retorna o texto como está
           return rawText;
