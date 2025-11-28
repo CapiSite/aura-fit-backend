@@ -17,7 +17,8 @@ export class PromptInterceptor implements MessageInterceptor {
   async handle(
     message: TelegramBot.Message,
   ): Promise<TelegramBot.Message & { prompt?: string }> {
-    const chatId = String(message.chat.id);
+    const telegramChatId = message.chat.id;
+    const chatId = BigInt(telegramChatId);
     const userMessage = message.text?.trim() ?? '';
 
     if (!userMessage) {
@@ -33,7 +34,6 @@ export class PromptInterceptor implements MessageInterceptor {
       userProfile = await this.prisma.userProfile.create({
         data: {
           chatId,
-          cpf: chatId, // Using chatId as temporary CPF until user provides real one
           name: message.from?.first_name ?? 'Usuário',
           goals: [],
           dietaryRestrictions: [],

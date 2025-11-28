@@ -29,7 +29,7 @@ export class UsersService {
   }
 
   async updateProfileFromIA(
-    chatId: string,
+    chatId: bigint | number,
     data: Partial<UserProfile>,
   ): Promise<UserProfile> {
     return this.prisma.userProfile.update({

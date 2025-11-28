@@ -75,6 +75,8 @@ export class GptService {
       return 'O modelo GPT não está configurado no momento.';
     }
 
+    const prismaChatId =
+      typeof chatId === 'bigint' ? chatId : BigInt(chatId);
     const maxRetries = 3;
     const baseDelayMs = 600;
 
@@ -85,7 +87,7 @@ export class GptService {
         if (this.assistantId) {
           console.log('GPT Assistants: using assistant', this.assistantId);
           const profile = await this.prisma.userProfile.findUnique({
-            where: { chatId: String(chatId) },
+            where: { chatId: prismaChatId },
           });
           let threadId = profile?.assistantThreadId ?? null;
           if (!threadId) {
@@ -94,7 +96,7 @@ export class GptService {
             console.log('GPT Assistants: thread created', threadId);
             if (profile) {
               await this.prisma.userProfile.update({
-                where: { chatId: String(chatId) },
+                where: { chatId: prismaChatId },
                 data: { assistantThreadId: threadId },
               });
             }
@@ -214,10 +216,8 @@ export class GptService {
             parsedResponse;
 
           if (userProfile && Object.keys(userProfile).length > 0) {
-            // Convert chatId to string for Prisma 7 compatibility
-            const stringChatId = String(chatId);
             await this.usersService.updateProfileFromIA(
-              stringChatId,
+              prismaChatId,
               userProfile,
             );
             this.logger.log(`Perfil do chat ${chatId} atualizado via IA.`);

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
 import { GptService } from 'src/gpt/gpt.service';
+import { PrismaService } from 'src/prisma_connection/prisma.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -16,6 +17,7 @@ export class WhatsappService {
   constructor(
     private readonly configService: ConfigService,
     private readonly gptService: GptService,
+    private readonly prisma: PrismaService,
   ) {
     this.instanceId = this.configService.get<string>('whatsapp.instanceId') ?? '';
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
@@ -35,6 +37,18 @@ export class WhatsappService {
 
   private normalizePhone(phone?: string) {
     return phone?.replace(/[^\d]/g, '') ?? '';
+  }
+
+  private tryParseChatId(phone: string): bigint | null {
+    const normalized = this.normalizePhone(phone);
+    if (!normalized) {
+      return null;
+    }
+    try {
+      return BigInt(normalized);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -84,6 +98,20 @@ export class WhatsappService {
     return this.normalizePhone(cleaned);
   }
 
+  private async isAuthorizedPhone(phone: string): Promise<boolean> {
+    const chatId = this.tryParseChatId(phone);
+    if (!chatId) {
+      return false;
+    }
+
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { chatId },
+      select: { chatId: true },
+    });
+
+    return Boolean(profile);
+  }
+
   async handleWebhook(payload: WebhookEventDto) {
     const phone = this.extractPhoneFromWebhook(payload);
     if (phone) {
@@ -101,8 +129,9 @@ export class WhatsappService {
     const isFromMe = payload?.message?.fromMe || payload?.fromMe;
 
     if (phone && textMessage && !isFromMe) {
-      if (phone !== '556183522246') {
-        console.log(`Ignoring message from unauthorized phone: ${phone}`);
+      const authorized = await this.isAuthorizedPhone(phone);
+      if (!authorized) {
+        console.log(`Ignoring message from unregistered phone: ${phone}`);
         return { received: true };
       }
       console.log(`Received message from ${phone}: ${textMessage}`);
