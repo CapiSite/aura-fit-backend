@@ -18,7 +18,7 @@ export class PromptInterceptor implements MessageInterceptor {
     message: TelegramBot.Message,
   ): Promise<TelegramBot.Message & { prompt?: string }> {
     const telegramChatId = message.chat.id;
-    const chatId = BigInt(telegramChatId);
+    const chatId = String(telegramChatId);
     const userMessage = message.text?.trim() ?? '';
 
     if (!userMessage) {
@@ -34,6 +34,7 @@ export class PromptInterceptor implements MessageInterceptor {
       userProfile = await this.prisma.userProfile.create({
         data: {
           chatId,
+          cpf: String(chatId),
           name: message.from?.first_name ?? 'Usuário',
           goals: [],
           dietaryRestrictions: [],
@@ -41,6 +42,10 @@ export class PromptInterceptor implements MessageInterceptor {
           allergies: [],
           medicalConditions: [],
           medications: [],
+          subscriptionPlan: 'FREE',
+          subscriptionExpiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+          requestsToday: 0,
+          requestsLastReset: new Date(),
         },
       });
     }

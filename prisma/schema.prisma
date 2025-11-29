@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
   schemas  = ["aura"]
 }
 
@@ -80,6 +81,10 @@ model UserProfile {
   // IA / Assistente
   assistantThreadId String?
 
+  // Credenciais
+  passwordHash String?
+  passwordSalt String?
+
   // Metas e histórico básico
   lastCheckInAt DateTime?
   lastWeighInAt DateTime?
@@ -91,6 +96,8 @@ model UserProfile {
   isPaymentActive       Boolean @default(false)
   lastPaymentAt         DateTime?
   nextBillingAt         DateTime?
+  requestsToday         Int @default(0)
+  requestsLastReset     DateTime?
 
   // Relações
   meals          Meal[]

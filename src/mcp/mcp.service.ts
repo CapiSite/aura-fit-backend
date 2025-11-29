@@ -33,13 +33,7 @@ export class McpService {
           return { error: 'O parâmetro chatId é obrigatório.' };
         }
 
-        let prismaChatId: bigint;
-        try {
-          prismaChatId =
-            typeof chatId === 'bigint' ? chatId : BigInt(chatId);
-        } catch {
-          return { error: 'O chatId informado é inválido.' };
-        }
+        const prismaChatId = String(chatId);
 
         const profile = await this.prisma.userProfile.findUnique({
           where: { chatId: prismaChatId },
@@ -131,13 +125,7 @@ export class McpService {
         const { chatId, ...data } = args;
         if (!chatId) return { error: 'chatId é obrigatório' };
 
-        let prismaChatId: bigint;
-        try {
-          prismaChatId =
-            typeof chatId === 'bigint' ? chatId : BigInt(chatId);
-        } catch {
-          return { error: 'O chatId informado é inválido.' };
-        }
+        const prismaChatId = String(chatId);
 
         try {
           const updated = await this.prisma.userProfile.update({

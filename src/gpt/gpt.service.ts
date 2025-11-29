@@ -75,8 +75,55 @@ export class GptService {
       return 'O modelo GPT não está configurado no momento.';
     }
 
-    const prismaChatId =
-      typeof chatId === 'bigint' ? chatId : BigInt(chatId);
+    const prismaChatId = String(chatId);
+    const now = new Date();
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { chatId: prismaChatId },
+      select: {
+        subscriptionPlan: true,
+        subscriptionExpiresAt: true,
+        isPaymentActive: true,
+        requestsToday: true,
+        requestsLastReset: true,
+      },
+    });
+    if (!profile) {
+      return 'Perfil não encontrado.';
+    }
+    const limits: Record<string, number> = { FREE: 4, PLUS: 10, PRO: 20 };
+    const last = profile.requestsLastReset ?? now;
+    const resetNeeded =
+      last.getUTCFullYear() !== now.getUTCFullYear() ||
+      last.getUTCMonth() !== now.getUTCMonth() ||
+      last.getUTCDate() !== now.getUTCDate();
+    if (resetNeeded) {
+      await this.prisma.userProfile.update({
+        where: { chatId: prismaChatId },
+        data: { requestsToday: 0, requestsLastReset: now },
+      });
+    }
+    const plan = profile.subscriptionPlan as unknown as string;
+    const limit = limits[plan] ?? 0;
+    const expiresAt = profile.subscriptionExpiresAt;
+    const isTrialExpired =
+      plan === 'FREE' &&
+      !profile.isPaymentActive &&
+      !!expiresAt &&
+      now > expiresAt;
+    if (isTrialExpired) {
+      return 'Seu período de teste de 3 dias terminou. Assine PRO ou PLUS.';
+    }
+    const current = await this.prisma.userProfile.findUnique({
+      where: { chatId: prismaChatId },
+      select: { requestsToday: true },
+    });
+    if ((current?.requestsToday ?? 0) >= limit) {
+      return 'Você atingiu o limite diário do seu plano.';
+    }
+    await this.prisma.userProfile.update({
+      where: { chatId: prismaChatId },
+      data: { requestsToday: (current?.requestsToday ?? 0) + 1 },
+    });
     const maxRetries = 3;
     const baseDelayMs = 600;
 

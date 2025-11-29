@@ -39,16 +39,12 @@ export class WhatsappService {
     return phone?.replace(/[^\d]/g, '') ?? '';
   }
 
-  private tryParseChatId(phone: string): bigint | null {
+  private tryParseChatId(phone: string): string | null {
     const normalized = this.normalizePhone(phone);
     if (!normalized) {
       return null;
     }
-    try {
-      return BigInt(normalized);
-    } catch {
-      return null;
-    }
+    return normalized;
   }
 
   /**
