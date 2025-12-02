@@ -13,6 +13,9 @@ export class CreateUserDto {
   cpf: string;
 
   @IsString()
+  email?: string;
+
+  @IsString()
   @IsIn(['FREE', 'PLUS', 'PRO'])
   subscriptionPlan: SubscriptionPlan;
 }

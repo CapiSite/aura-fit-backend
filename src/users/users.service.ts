@@ -13,6 +13,7 @@ export class UsersService {
       chatId: String(createUserDto.chatId),
       name: createUserDto.name,
       cpf: createUserDto.cpf,
+      email: createUserDto.email ?? `${createUserDto.cpf}@aura.local`,
       subscriptionPlan: createUserDto.subscriptionPlan ?? 'FREE',
       requestsToday: 0,
       requestsLastReset: new Date(),
@@ -70,6 +71,15 @@ export class UsersService {
       }
       throw new BadRequestException('Erro ao remover usuário');
     }
+  }
+
+  async getStatsByCpf(cpf: string) {
+    if (!cpf) throw new BadRequestException('CPF não informado');
+    const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    return {
+      requestsToday: user.requestsToday ?? 0,
+    };
   }
 
   async updateProfileFromIA(

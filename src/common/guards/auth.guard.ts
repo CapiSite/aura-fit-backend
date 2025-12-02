@@ -7,7 +7,7 @@ import crypto from 'crypto';
 export class AuthGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) { }
 
-  private verifyToken(token: string): { cpf: string; exp: number } | null {
+  private verifyToken(token: string): { cpf: string; exp: number; role?: string } | null {
     const secret = this.config.get<string>('AUTH_SECRET') ?? 'dev-secret';
     const [data, sig] = token.split('.');
     if (!data || !sig) return null;
@@ -36,7 +36,7 @@ export class AuthGuard implements CanActivate {
     const user = await this.prisma.userProfile.findUnique({ where: { cpf: payload.cpf } });
     if (!user) throw new UnauthorizedException('Usuário não encontrado');
 
-    req['user'] = { cpf: payload.cpf };
+    req['user'] = { cpf: payload.cpf, role: payload.role ?? 'USER' };
     return true;
   }
 }

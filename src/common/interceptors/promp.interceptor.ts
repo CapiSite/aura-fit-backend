@@ -35,6 +35,7 @@ export class PromptInterceptor implements MessageInterceptor {
         data: {
           chatId,
           cpf: String(chatId),
+          email: `${chatId}@aura.local`,
           name: message.from?.first_name ?? 'Usuário',
           goals: [],
           dietaryRestrictions: [],
