@@ -13,6 +13,7 @@ export class WhatsappService {
   private readonly token: string;
   private readonly clientToken: string;
   private readonly webhookMessages = new Map<string, any[]>();
+  private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
 
   constructor(
     private readonly configService: ConfigService,
@@ -94,6 +95,39 @@ export class WhatsappService {
     return this.normalizePhone(cleaned);
   }
 
+  private buildMessageKey(phone: string, payload: WebhookEventDto): string | null {
+    const candidates = [
+      payload?.messageId,
+      payload?.message?.messageId,
+      payload?.message?.id,
+      payload?.data?.messageId,
+      payload?.data?.id,
+      payload?.body?.messageId,
+      payload?.text?.messageId,
+      payload?.message?.timestamp,
+      payload?.timestamp,
+    ].filter(Boolean) as (string | number)[];
+
+    if (!phone || candidates.length === 0) {
+      return null;
+    }
+
+    return `${phone}:${candidates[0]}`;
+  }
+
+  private registerMessageKey(key: string) {
+    const now = Date.now();
+    this.processedMessages.set(key, now);
+
+    // Clean entries older than 1 day to avoid unbounded growth
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    for (const [k, ts] of this.processedMessages.entries()) {
+      if (now - ts > oneDayMs) {
+        this.processedMessages.delete(k);
+      }
+    }
+  }
+
   private async isAuthorizedPhone(phone: string): Promise<boolean> {
     const chatId = this.tryParseChatId(phone);
     if (!chatId) {
@@ -125,6 +159,15 @@ export class WhatsappService {
     const isFromMe = payload?.message?.fromMe || payload?.fromMe;
 
     if (phone && textMessage && !isFromMe) {
+      const messageKey = this.buildMessageKey(phone, payload);
+      if (messageKey) {
+        if (this.processedMessages.has(messageKey)) {
+          console.log('Ignoring duplicated WhatsApp webhook', { phone, messageKey });
+          return { received: true, duplicated: true };
+        }
+        this.registerMessageKey(messageKey);
+      }
+
       const authorized = await this.isAuthorizedPhone(phone);
       if (!authorized) {
         console.log(`Ignoring message from unregistered phone: ${phone}`);

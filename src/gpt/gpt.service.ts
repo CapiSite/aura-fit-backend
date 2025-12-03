@@ -102,8 +102,12 @@ export class GptService {
         data: { requestsToday: 0, requestsLastReset: now },
       });
     }
-    const plan = profile.subscriptionPlan as unknown as string;
-    const limit = limits[plan] ?? 0;
+    const plan =
+      ((profile.subscriptionPlan as unknown as string) ?? 'FREE')
+        .toString()
+        .trim()
+        .toUpperCase();
+    const limit = limits[plan] ?? limits.FREE;
     const expiresAt = profile.subscriptionExpiresAt;
     const isTrialExpired =
       plan === 'FREE' &&

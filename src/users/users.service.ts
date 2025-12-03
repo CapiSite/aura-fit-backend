@@ -77,8 +77,20 @@ export class UsersService {
     if (!cpf) throw new BadRequestException('CPF não informado');
     const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
+    const limits: Record<string, number> = { FREE: 5, PLUS: 25, PRO: 40 };
+    const plan =
+      ((user.subscriptionPlan as unknown as string) ?? 'FREE')
+        .toString()
+        .trim()
+        .toUpperCase();
+    const dailyLimit = limits[plan] ?? limits.FREE;
+    const usedToday = user.requestsToday ?? 0;
     return {
-      requestsToday: user.requestsToday ?? 0,
+      subscriptionPlan: plan,
+      requestsLimitPerDay: dailyLimit,
+      requestsToday: usedToday,
+      requestsRemaining: Math.max(dailyLimit - usedToday, 0),
+      requestsLastReset: user.requestsLastReset,
     };
   }
 
