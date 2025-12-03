@@ -18,7 +18,8 @@ import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
     PrismaModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [telegramConfig, gptConfig, whatsappConfig],
+      load: [// telegramConfig,
+         gptConfig, whatsappConfig],
     }),
     //TelegramModule,
     GptModule,
