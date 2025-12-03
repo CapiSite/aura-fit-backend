@@ -7,9 +7,92 @@ datasource db {
   schemas  = ["aura"]
 }
 
-/* -------------------------------------------------------
-   Enums
-------------------------------------------------------- */
+model UserProfile {
+  chatId                String           @id
+  name                  String
+  cpf                   String           @unique
+  email                 String
+  weight                Float?
+  height                Float?
+  activityLevel         String?
+  workType              String?
+  goals                 String[]
+  dietaryRestrictions   String[]
+  preferences           String[]
+  allergies             String[]
+  medicalConditions     String[]
+  medications           String[]
+  usualMealsPerDay      Int?
+  wakeTime              String?
+  sleepTime             String?
+  timezone              String?
+  caloricTarget         Int?
+  proteinTarget         Int?
+  carbTarget            Int?
+  fatTarget             Int?
+  planStyle             PlanStyle?
+  assistantThreadId     String?
+  passwordHash          String?
+  lastCheckInAt         DateTime?
+  lastWeighInAt         DateTime?
+  notes                 String?
+  subscriptionPlan      SubscriptionPlan @default(FREE)
+  subscriptionExpiresAt DateTime?
+  isPaymentActive       Boolean          @default(false)
+  lastPaymentAt         DateTime?
+  nextBillingAt         DateTime?
+  requestsToday         Int              @default(0)
+  requestsLastReset     DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  role                  Role             @default(USER)
+  meals                 Meal[]
+  payments              Payment[]
+  userMetricLogs        UserMetricLog[]
+
+  @@map("user_profile")
+  @@schema("aura")
+}
+
+model Meal {
+  id            Int         @id @default(autoincrement())
+  userProfileId String
+  content       String
+  mealType      MealType
+  timestamp     DateTime    @default(now())
+  userProfile   UserProfile @relation(fields: [userProfileId], references: [chatId])
+
+  @@map("meal")
+  @@schema("aura")
+}
+
+model UserMetricLog {
+  id       Int         @id @default(autoincrement())
+  chatId   String
+  loggedAt DateTime    @default(now())
+  weight   Float?
+  bodyFat  Float?
+  waist    Float?
+  hip      Float?
+  user     UserProfile @relation(fields: [chatId], references: [chatId])
+
+  @@map("user_metric_log")
+  @@schema("aura")
+}
+
+model Payment {
+  id     Int              @id @default(autoincrement())
+  chatId String
+  amount Float
+  plan   SubscriptionPlan
+  status String
+  method String?
+  paidAt DateTime         @default(now())
+  user   UserProfile      @relation(fields: [chatId], references: [chatId])
+
+  @@map("payment")
+  @@schema("aura")
+}
 
 enum MealType {
   BREAKFAST
@@ -39,122 +122,9 @@ enum SubscriptionPlan {
   @@schema("aura")
 }
 
-/* -------------------------------------------------------
-   User Profile (dados detalhados)
-------------------------------------------------------- */
+enum Role {
+  USER
+  ADMIN
 
-model UserProfile {
-  chatId String @id
-  name   String
-  cpf    String @unique
-
-  // Dados físicos
-  weight Float?
-  height Float?
-
-  // Estilo de vida
-  activityLevel String?
-  workType      String?
-
-  // Objetivos e restrições
-  goals               String[]
-  dietaryRestrictions String[]
-  preferences         String[]
-  allergies           String[]
-  medicalConditions   String[]
-  medications         String[]
-
-  // Rotina
-  usualMealsPerDay Int?
-  wakeTime         String?
-  sleepTime        String?
-  timezone         String?
-
-  // Plano nutricional
-  caloricTarget Int?
-  proteinTarget Int?
-  carbTarget    Int?
-  fatTarget     Int?
-  planStyle     PlanStyle?
-
-  // IA / Assistente
-  assistantThreadId String?
-
-  // Metas e histórico básico
-  lastCheckInAt DateTime?
-  lastWeighInAt DateTime?
-  notes         String?
-
-  // Assinatura / planos
-  subscriptionPlan      SubscriptionPlan @default(FREE)
-  subscriptionExpiresAt DateTime?
-  isPaymentActive       Boolean @default(false)
-  lastPaymentAt         DateTime?
-  nextBillingAt         DateTime?
-
-  // Relações
-  meals          Meal[]
-  userMetricLogs UserMetricLog[]
-  payments       Payment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("user_profile")
-  @@schema("aura")
-}
-
-/* -------------------------------------------------------
-   Registro de refeições
-------------------------------------------------------- */
-
-model Meal {
-  id            Int @id @default(autoincrement())
-  userProfileId String
-  userProfile   UserProfile @relation(fields: [userProfileId], references: [chatId])
-
-  content   String
-  mealType  MealType
-  timestamp DateTime @default(now())
-
-  @@map("meal")
-  @@schema("aura")
-}
-
-/* -------------------------------------------------------
-   Logs de métricas físicas
-------------------------------------------------------- */
-
-model UserMetricLog {
-  id     Int @id @default(autoincrement())
-  chatId String
-  user   UserProfile @relation(fields: [chatId], references: [chatId])
-
-  loggedAt DateTime @default(now())
-  weight   Float?
-  bodyFat  Float?
-  waist    Float?
-  hip      Float?
-
-  @@map("user_metric_log")
-  @@schema("aura")
-}
-
-/* -------------------------------------------------------
-   Histórico de pagamentos
-------------------------------------------------------- */
-
-model Payment {
-  id        Int @id @default(autoincrement())
-  chatId    String
-  user      UserProfile @relation(fields: [chatId], references: [chatId])
-
-  amount Float
-  plan   SubscriptionPlan
-  status String       // "PAID", "FAILED", "REFUNDED"
-  method String?      // PIX, CARTAO, etc
-  paidAt DateTime @default(now())
-
-  @@map("payment")
   @@schema("aura")
 }

@@ -33,8 +33,10 @@ export class McpService {
           return { error: 'O parâmetro chatId é obrigatório.' };
         }
 
+        const prismaChatId = String(chatId);
+
         const profile = await this.prisma.userProfile.findUnique({
-          where: { chatId: String(chatId) },
+          where: { chatId: prismaChatId },
         });
 
         if (!profile) {
@@ -123,9 +125,11 @@ export class McpService {
         const { chatId, ...data } = args;
         if (!chatId) return { error: 'chatId é obrigatório' };
 
+        const prismaChatId = String(chatId);
+
         try {
           const updated = await this.prisma.userProfile.update({
-            where: { chatId: String(chatId) },
+            where: { chatId: prismaChatId },
             data: data,
           });
 
