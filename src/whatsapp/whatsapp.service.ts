@@ -4,6 +4,7 @@ import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
 import { GptService } from 'src/gpt/gpt.service';
 import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { ReminderService } from 'src/common/triggers/reminder.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -19,10 +20,20 @@ export class WhatsappService {
     private readonly configService: ConfigService,
     private readonly gptService: GptService,
     private readonly prisma: PrismaService,
+    private readonly reminderService: ReminderService,
   ) {
     this.instanceId = this.configService.get<string>('whatsapp.instanceId') ?? '';
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
     this.clientToken = this.configService.get<string>('whatsapp.clientToken') ?? '';
+
+    this.reminderService.registerTransport({
+      name: 'whatsapp',
+      send: async (chatId, message) => {
+        const phone = this.normalizePhone(chatId);
+        if (!phone) return;
+        await this.sendText({ phone, message });
+      },
+    });
   }
 
   private get baseUrl() {
@@ -154,11 +165,18 @@ export class WhatsappService {
       hasMessage: Boolean(payload?.message),
     });
 
-    // Check if it is a text message from user
     const textMessage = payload?.message?.text?.message || payload?.text?.message;
+    const imageUrl = this.extractImageUrl(payload);
+    if (!textMessage && !imageUrl && payload?.message) {
+      console.log('WhatsApp webhook message without text/image recognized', {
+        messageType: payload?.message?.type,
+        hasImage: Boolean(payload?.message?.image || payload?.message?.media),
+        keys: Object.keys(payload?.message ?? {}),
+      });
+    }
     const isFromMe = payload?.message?.fromMe || payload?.fromMe;
 
-    if (phone && textMessage && !isFromMe) {
+    if (phone && (textMessage || imageUrl) && !isFromMe) {
       const messageKey = this.buildMessageKey(phone, payload);
       if (messageKey) {
         if (this.processedMessages.has(messageKey)) {
@@ -173,9 +191,16 @@ export class WhatsappService {
         console.log(`Ignoring message from unregistered phone: ${phone}`);
         return { received: true };
       }
-      console.log(`Received message from ${phone}: ${textMessage}`);
+      console.log(`Received message from ${phone}: ${textMessage ?? '[image]'}`);
       try {
-        const response = await this.gptService.generateResponse(textMessage, phone);
+        const prompt =
+          textMessage?.trim() ||
+          'Analise a imagem enviada e responda ao usuario com orientacoes uteis.';
+        const response = await this.gptService.generateResponse(
+          prompt,
+          phone,
+          imageUrl ?? undefined,
+        );
         await this.sendText({ phone, message: response });
       } catch (error) {
         console.error('Error generating GPT response for WhatsApp:', error);
@@ -226,5 +251,77 @@ export class WhatsappService {
       count: cachedMessages.length,
     });
     return cachedMessages;
+  }
+
+  private extractImageUrl(payload: WebhookEventDto): string | null {
+    const candidates = [
+      payload?.message?.imageUrl,
+      payload?.message?.image?.url,
+      payload?.message?.image?.link,
+      payload?.message?.image?.downloadUrl,
+      payload?.message?.image?.originalUrl,
+      payload?.message?.media?.url,
+      payload?.message?.media?.link,
+      payload?.message?.media?.downloadUrl,
+      payload?.message?.file?.url,
+      payload?.message?.file?.link,
+      payload?.message?.file?.downloadUrl,
+      payload?.message?.mediaUrl,
+      payload?.data?.imageUrl,
+      payload?.data?.image?.url,
+      payload?.data?.image?.link,
+      payload?.data?.image?.downloadUrl,
+      payload?.data?.image?.originalUrl,
+      payload?.data?.media?.url,
+      payload?.data?.media?.link,
+      payload?.data?.media?.downloadUrl,
+      payload?.data?.file?.url,
+      payload?.data?.file?.link,
+      payload?.data?.file?.downloadUrl,
+      payload?.data?.mediaUrl,
+      payload?.imageUrl,
+      payload?.mediaUrl,
+      payload?.body?.imageUrl,
+      payload?.body?.mediaUrl,
+    ].filter((u) => typeof u === 'string' && u.trim().length > 0) as string[];
+
+    if (candidates.length) {
+      return candidates[0];
+    }
+
+    // fallback: scan payload for the first URL-like string that looks like an image
+    const deepUrl = this.findFirstUrl(payload);
+    return deepUrl ?? null;
+  }
+
+  private findFirstUrl(obj: any): string | null {
+    const visited = new Set<any>();
+    const stack = [obj];
+    const urlPattern = /^https?:\/\//i;
+    const imageHint = /(image|img|photo|media|file)/i;
+    const imageExt = /\.(png|jpe?g|webp|gif|heic|bmp)(\?|#|$)/i;
+
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current || typeof current !== 'object' || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      for (const value of Object.values(current)) {
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (
+            urlPattern.test(trimmed) &&
+            (imageExt.test(trimmed) || imageHint.test(trimmed))
+          ) {
+            return trimmed;
+          }
+        } else if (typeof value === 'object') {
+          stack.push(value);
+        }
+      }
+    }
+    return null;
   }
 }

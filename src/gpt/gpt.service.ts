@@ -70,6 +70,7 @@ export class GptService {
   public async generateResponse(
     prompt: string,
     chatId: number | string,
+    imageUrl?: string,
   ): Promise<string> {
     if (!this.client) {
       return 'O modelo GPT não está configurado no momento.';
@@ -90,7 +91,7 @@ export class GptService {
     if (!profile) {
       return 'Perfil não encontrado.';
     }
-    const limits: Record<string, number> = { FREE: 4, PLUS: 10, PRO: 20 };
+    const limits: Record<string, number> = { FREE: 4, PLUS: 20, PRO: 30 };
     const last = profile.requestsLastReset ?? now;
     const resetNeeded =
       last.getUTCFullYear() !== now.getUTCFullYear() ||
@@ -135,7 +136,8 @@ export class GptService {
       try {
         let rawText: string;
 
-        if (this.assistantId) {
+        const shouldUseAssistant = this.assistantId && !imageUrl;
+        if (shouldUseAssistant) {
           console.log('GPT Assistants: using assistant', this.assistantId);
           const profile = await this.prisma.userProfile.findUnique({
             where: { chatId: prismaChatId },
@@ -244,9 +246,17 @@ export class GptService {
             .trim();
         } else {
           console.log('GPT Chat Completions: using model', this.model);
+          const userContent: any[] = [{ type: 'text', text: prompt }];
+          if (imageUrl) {
+            userContent.push({
+              type: 'image_url',
+              image_url: { url: imageUrl },
+            });
+          }
+
           const completion = await this.client.chat.completions.create({
-            model: this.model,
-            messages: [{ role: 'user', content: prompt }],
+            model: this.model || 'gpt-4o-mini',
+            messages: [{ role: 'user', content: userContent }],
           });
 
           const choice = completion.choices[0]?.message?.content;
