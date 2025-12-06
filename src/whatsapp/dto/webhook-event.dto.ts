@@ -38,6 +38,18 @@ export class WebhookEventDto {
   messageId?: string;
 
   @IsOptional()
+  @IsString()
+  image?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  caption?: string;
+
+  @IsOptional()
   @IsObject()
   text?: Record<string, any>;
 

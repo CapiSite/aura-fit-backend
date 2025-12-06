@@ -8,47 +8,50 @@ datasource db {
 }
 
 model UserProfile {
-  chatId                String           @id
-  name                  String
-  cpf                   String           @unique
-  email                 String
-  weight                Float?
-  height                Float?
-  activityLevel         String?
-  workType              String?
-  goals                 String[]
-  dietaryRestrictions   String[]
-  preferences           String[]
-  allergies             String[]
-  medicalConditions     String[]
-  medications           String[]
-  usualMealsPerDay      Int?
-  wakeTime              String?
-  sleepTime             String?
-  timezone              String?
-  caloricTarget         Int?
-  proteinTarget         Int?
-  carbTarget            Int?
-  fatTarget             Int?
-  planStyle             PlanStyle?
-  assistantThreadId     String?
-  passwordHash          String?
-  lastCheckInAt         DateTime?
-  lastWeighInAt         DateTime?
-  notes                 String?
-  subscriptionPlan      SubscriptionPlan @default(FREE)
-  subscriptionExpiresAt DateTime?
-  isPaymentActive       Boolean          @default(false)
-  lastPaymentAt         DateTime?
-  nextBillingAt         DateTime?
-  requestsToday         Int              @default(0)
-  requestsLastReset     DateTime?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-  role                  Role             @default(USER)
-  meals                 Meal[]
-  payments              Payment[]
-  userMetricLogs        UserMetricLog[]
+  chatId                       String           @id
+  name                         String
+  weight                       Float?
+  height                       Float?
+  activityLevel                String?
+  workType                     String?
+  goals                        String[]
+  dietaryRestrictions          String[]
+  preferences                  String[]
+  allergies                    String[]
+  medicalConditions            String[]
+  medications                  String[]
+  usualMealsPerDay             Int?
+  wakeTime                     String?
+  sleepTime                    String?
+  timezone                     String?
+  caloricTarget                Int?
+  proteinTarget                Int?
+  carbTarget                   Int?
+  fatTarget                    Int?
+  assistantThreadId            String?
+  lastCheckInAt                DateTime?
+  lastWeighInAt                DateTime?
+  notes                        String?
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
+  cpf                          String           @unique
+  isPaymentActive              Boolean          @default(false)
+  lastPaymentAt                DateTime?
+  nextBillingAt                DateTime?
+  subscriptionExpiresAt        DateTime?
+  subscriptionPlan             SubscriptionPlan @default(FREE)
+  planStyle                    PlanStyle?
+  requestsLastReset            DateTime?
+  requestsToday                Int              @default(0)
+  passwordHash                 String?
+  email                        String
+  role                         Role             @default(USER)
+  waterReminderEnabled         Boolean          @default(true)
+  waterReminderIntervalMinutes Int              @default(180)
+  waterReminderLastSent        DateTime?
+  meals                        Meal[]
+  payments                     Payment[]
+  userMetricLogs               UserMetricLog[]
 
   @@map("user_profile")
   @@schema("aura")

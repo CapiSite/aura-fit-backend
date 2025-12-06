@@ -70,6 +70,7 @@ export class GptService {
   public async generateResponse(
     prompt: string,
     chatId: number | string,
+    imageUrl?: string,
   ): Promise<string> {
     if (!this.client) {
       return 'O modelo GPT não está configurado no momento.';
@@ -102,11 +103,10 @@ export class GptService {
         data: { requestsToday: 0, requestsLastReset: now },
       });
     }
-    const plan =
-      ((profile.subscriptionPlan as unknown as string) ?? 'FREE')
-        .toString()
-        .trim()
-        .toUpperCase();
+    const plan = ((profile.subscriptionPlan as unknown as string) ?? 'FREE')
+      .toString()
+      .trim()
+      .toUpperCase();
     const limit = limits[plan] ?? limits.FREE;
     const expiresAt = profile.subscriptionExpiresAt;
     const isTrialExpired =
@@ -155,23 +155,29 @@ export class GptService {
             console.log('GPT Assistants: reusing thread', threadId);
           }
 
+          const messageContent: any[] = [{ type: 'text', text: prompt }];
+          if (imageUrl) {
+            messageContent.push({
+              type: 'image_url',
+              image_url: { url: imageUrl },
+            });
+          }
+
           await this.client.beta.threads.messages.create(threadId, {
             role: 'user',
-            content: prompt,
+            content: messageContent,
           });
 
           const run = await this.client.beta.threads.runs.create(threadId, {
             assistant_id: this.assistantId,
-            tools: this.mcpService
-              .getTools()
-              .map((t) => ({
-                type: 'function',
-                function: {
-                  name: t.name,
-                  description: t.description,
-                  parameters: t.parametersSchema,
-                },
-              })) as any,
+            tools: this.mcpService.getTools().map((t) => ({
+              type: 'function',
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parametersSchema,
+              },
+            })) as any,
           });
 
           console.log('GPT Assistants: run started', run.id);
@@ -244,9 +250,21 @@ export class GptService {
             .trim();
         } else {
           console.log('GPT Chat Completions: using model', this.model);
+          const messages: any[] = [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                ...(imageUrl
+                  ? [{ type: 'image_url', image_url: { url: imageUrl } }]
+                  : []),
+              ],
+            },
+          ];
+
           const completion = await this.client.chat.completions.create({
             model: this.model,
-            messages: [{ role: 'user', content: prompt }],
+            messages: messages,
           });
 
           const choice = completion.choices[0]?.message?.content;

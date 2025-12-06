@@ -20,9 +20,11 @@ export class WhatsappService {
     private readonly gptService: GptService,
     private readonly prisma: PrismaService,
   ) {
-    this.instanceId = this.configService.get<string>('whatsapp.instanceId') ?? '';
+    this.instanceId =
+      this.configService.get<string>('whatsapp.instanceId') ?? '';
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
-    this.clientToken = this.configService.get<string>('whatsapp.clientToken') ?? '';
+    this.clientToken =
+      this.configService.get<string>('whatsapp.clientToken') ?? '';
   }
 
   private get baseUrl() {
@@ -95,7 +97,10 @@ export class WhatsappService {
     return this.normalizePhone(cleaned);
   }
 
-  private buildMessageKey(phone: string, payload: WebhookEventDto): string | null {
+  private buildMessageKey(
+    phone: string,
+    payload: WebhookEventDto,
+  ): string | null {
     const candidates = [
       payload?.messageId,
       payload?.message?.messageId,
@@ -155,14 +160,44 @@ export class WhatsappService {
     });
 
     // Check if it is a text message from user
-    const textMessage = payload?.message?.text?.message || payload?.text?.message;
-    const isFromMe = payload?.message?.fromMe || payload?.fromMe;
+    const textMessage =
+      payload?.message?.text?.message ||
+      payload?.text?.message ||
+      payload?.message?.caption ||
+      payload?.caption; // Caption for images
+    let imageUrl =
+      payload?.message?.imageUrl || payload?.imageUrl || payload?.image;
 
-    if (phone && textMessage && !isFromMe) {
+    console.log('DEBUG: Raw imageUrl detected:', {
+      type: typeof imageUrl,
+      value: imageUrl,
+      isObject: typeof imageUrl === 'object',
+      hasUrl: imageUrl?.url,
+    });
+
+    if (typeof imageUrl === 'object' && imageUrl?.url) {
+      imageUrl = imageUrl.url;
+    }
+
+    // Fallback: if still an object, try to find a string property or reset
+    if (typeof imageUrl === 'object') {
+      console.warn(
+        'DEBUG: imageUrl is still an object, trying to extract string...',
+      );
+      imageUrl = imageUrl?.imageUrl || imageUrl?.link || null;
+    }
+
+    const isFromMe =
+      payload?.message?.fromMe || payload?.fromMe || payload?.data?.fromMe;
+
+    if (phone && (textMessage || imageUrl) && !isFromMe) {
       const messageKey = this.buildMessageKey(phone, payload);
       if (messageKey) {
         if (this.processedMessages.has(messageKey)) {
-          console.log('Ignoring duplicated WhatsApp webhook', { phone, messageKey });
+          console.log('Ignoring duplicated WhatsApp webhook', {
+            phone,
+            messageKey,
+          });
           return { received: true, duplicated: true };
         }
         this.registerMessageKey(messageKey);
@@ -173,9 +208,15 @@ export class WhatsappService {
         console.log(`Ignoring message from unregistered phone: ${phone}`);
         return { received: true };
       }
-      console.log(`Received message from ${phone}: ${textMessage}`);
+      console.log(
+        `Received message from ${phone}: ${textMessage || '[Image]'} ${imageUrl ? `(Image: ${imageUrl})` : ''}`,
+      );
       try {
-        const response = await this.gptService.generateResponse(textMessage, phone);
+        const response = await this.gptService.generateResponse(
+          textMessage || 'Analise esta imagem',
+          phone,
+          imageUrl,
+        );
         await this.sendText({ phone, message: response });
       } catch (error) {
         console.error('Error generating GPT response for WhatsApp:', error);
