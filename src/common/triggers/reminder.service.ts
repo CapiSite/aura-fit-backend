@@ -10,11 +10,12 @@ export class ReminderService {
   private readonly checkIntervalMs = 5 * 60 * 1000; // verifica a cada 5 minutos
   private readonly activeHours = { start: 6, end: 23 }; // janela diária
   private readonly messages = [
-    'Hora de beber agua! Mantenha-se hidratado ao longo do dia.',
-    'Pausa rapida: pegue um copo de agua e cuide de voce.',
-    'Hidratacao e performance: agua agora e siga com energia.',
-    'Recarregue: uns goles de agua fazem diferenca.',
-    'Chego a hora de sé hidrate-se e respire fundo.',
+    'Bora beber água antes que a sede vire drama.',
+    'Seu corpo pediu: água. Seu eu futuro agradece.',
+    'Se a vida tá corrida, pelo menos a água não pode faltar.',
+    'Um gole hoje, zero dor de cabeça amanhã.',
+    'Recarrega aí: água é bateria do corpo.',
+    'Água agora. A sua melhor decisão em 3 segundos.'
   ];
   private reminderTimer?: NodeJS.Timeout;
 
