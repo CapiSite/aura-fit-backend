@@ -57,7 +57,7 @@ export class GptService {
       const firstName = message.from?.first_name ?? 'amigo';
       await this.telegramService.sendMessage(
         chatId,
-        `Olá, ${firstName}! Pode me enviar sua mensagem que eu consulto o GPT.`,
+        `Olá, ${firstName}! Pode me enviar sua mensagem`,
       );
       return;
     }
@@ -73,20 +73,13 @@ export class GptService {
     imageUrl?: string,
   ): Promise<string> {
     if (!this.client) {
-      return 'O modelo GPT não está configurado no momento.';
+      return 'O modelo não está configurado no momento.';
     }
 
     const prismaChatId = String(chatId);
     const now = new Date();
     const profile = await this.prisma.userProfile.findUnique({
       where: { chatId: prismaChatId },
-      select: {
-        subscriptionPlan: true,
-        subscriptionExpiresAt: true,
-        isPaymentActive: true,
-        requestsToday: true,
-        requestsLastReset: true,
-      },
     });
     if (!profile) {
       return 'Perfil não encontrado.';
@@ -117,17 +110,24 @@ export class GptService {
     if (isTrialExpired) {
       return 'Seu período de teste de 3 dias terminou. Assine PRO ou PLUS.';
     }
-    const current = await this.prisma.userProfile.findUnique({
-      where: { chatId: prismaChatId },
-      select: { requestsToday: true },
-    });
-    if ((current?.requestsToday ?? 0) >= limit) {
+    const requestsToday = resetNeeded ? 0 : profile.requestsToday ?? 0;
+    if (requestsToday >= limit) {
       return 'Você atingiu o limite diário do seu plano.';
     }
+    const updatedRequestsToday = requestsToday + 1;
     await this.prisma.userProfile.update({
       where: { chatId: prismaChatId },
-      data: { requestsToday: (current?.requestsToday ?? 0) + 1 },
+      data: {
+        requestsToday: updatedRequestsToday,
+        ...(resetNeeded ? { requestsLastReset: now } : {}),
+      },
     });
+    const profileForContext = {
+      ...profile,
+      requestsToday: updatedRequestsToday,
+      requestsLastReset: resetNeeded ? now : profile.requestsLastReset,
+    };
+    const profileJson = this.serializeProfile(profileForContext);
     const maxRetries = 3;
     const baseDelayMs = 600;
 
@@ -137,10 +137,7 @@ export class GptService {
 
         if (this.assistantId) {
           console.log('GPT Assistants: using assistant', this.assistantId);
-          const profile = await this.prisma.userProfile.findUnique({
-            where: { chatId: prismaChatId },
-          });
-          let threadId = profile?.assistantThreadId ?? null;
+          let threadId = profile.assistantThreadId ?? null;
           if (!threadId) {
             const created = await this.client.beta.threads.create({});
             threadId = created.id;
@@ -155,7 +152,13 @@ export class GptService {
             console.log('GPT Assistants: reusing thread', threadId);
           }
 
-          const messageContent: any[] = [{ type: 'text', text: prompt }];
+          const messageContent: any[] = [
+            {
+              type: 'text',
+              text: `Perfil completo do usuário (JSON):\n${profileJson}`,
+            },
+            { type: 'text', text: prompt },
+          ];
           if (imageUrl) {
             messageContent.push({
               type: 'image_url',
@@ -254,6 +257,10 @@ export class GptService {
             {
               role: 'user',
               content: [
+                {
+                  type: 'text',
+                  text: `Perfil completo do usuário (JSON):\n${profileJson}`,
+                },
                 { type: 'text', text: prompt },
                 ...(imageUrl
                   ? [{ type: 'image_url', image_url: { url: imageUrl } }]
@@ -321,5 +328,13 @@ export class GptService {
     }
 
     return 'O GPT está sobrecarregado. Tente novamente em instantes.';
+  }
+
+  private serializeProfile(profile: unknown): string {
+    return JSON.stringify(
+      profile,
+      (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+      2,
+    );
   }
 }
