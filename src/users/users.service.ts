@@ -1,12 +1,20 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PrismaService } from 'src/prisma_connection/prisma.service';
 import { SubscriptionPlan, UserProfile } from '@prisma/client';
+import { UpdateMeDto } from './dto/update-me.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { hashPassword, verifyPassword } from 'src/common/security/bcrypt';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+
+  private get passwordPepper(): string {
+    return this.config.get<string>('PASSWORD_PEPPER') ?? 'dev-password-pepper';
+  }
 
   async create(createUserDto: CreateUserDto) {
     const chatId = String(createUserDto.chatId);
@@ -87,7 +95,7 @@ export class UsersService {
 
   async getStatsByCpf(cpf: string) {
     if (!cpf) throw new BadRequestException('CPF nao informado');
-    const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
+    const user = await this.ensureDailyResetByCpf(cpf);
     if (!user) throw new NotFoundException('Usuario nao encontrado');
     const limits: Record<string, number> = { FREE: 5, PLUS: 25, PRO: 40 };
     const plan =
@@ -108,19 +116,28 @@ export class UsersService {
 
   async getUsageByCpf(cpf: string) {
     if (!cpf) throw new BadRequestException('CPF nao informado');
-    const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
+    const user = await this.ensureDailyResetByCpf(cpf);
     if (!user) throw new NotFoundException('Usuario nao encontrado');
 
-    const today = new Date();
-    const usage = Array.from({ length: 7 }).map((_, idx) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() - idx);
-      // Usa requestsToday como base simples; em producao coletar logs reais
-      const count = Math.max((user.requestsToday ?? 0) - idx, 0);
-      return { date: date.toISOString().slice(0, 10), count };
+    const usage = await this.prisma.promptUsage.findMany({
+      where: { chatId: user.chatId },
+      orderBy: { date: 'asc' },
+      take: 60,
     });
 
-    return usage.reverse();
+    if (!usage.length) {
+      return [
+        {
+          date: new Date().toISOString().slice(0, 10),
+          count: Math.max(user.requestsToday ?? 0, 0),
+        },
+      ];
+    }
+
+    return usage.map((item) => ({
+      date: item.date.toISOString().slice(0, 10),
+      count: item.count ?? 0,
+    }));
   }
 
   async getMeByCpf(cpf: string) {
@@ -158,5 +175,67 @@ export class UsersService {
     // TODO: implement IA processing
     console.log('Processando mensagem no UsersService:', message);
     return profile;
+  }
+
+  private isSameUtcDay(a: Date, b: Date): boolean {
+    return (
+      a.getUTCFullYear() === b.getUTCFullYear() &&
+      a.getUTCMonth() === b.getUTCMonth() &&
+      a.getUTCDate() === b.getUTCDate()
+    );
+  }
+
+  private async ensureDailyResetByCpf(cpf: string): Promise<UserProfile> {
+    const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
+    if (!user) throw new NotFoundException('Usuario nao encontrado');
+
+    const now = new Date();
+    const last = user.requestsLastReset ?? now;
+    if (this.isSameUtcDay(last, now)) {
+      return user;
+    }
+
+    return this.prisma.userProfile.update({
+      where: { cpf },
+      data: { requestsToday: 0, requestsLastReset: now },
+    });
+  }
+
+  async updateMeByCpf(cpf: string, dto: UpdateMeDto) {
+    const user = await this.ensureDailyResetByCpf(cpf);
+    const data: any = {};
+    if (dto.name) data.name = dto.name.trim();
+    if (dto.email) data.email = dto.email.trim();
+
+    if (data.email) {
+      const exists = await this.prisma.userProfile.findFirst({
+        where: { email: data.email, NOT: { cpf } },
+      });
+      if (exists) throw new ConflictException('E-mail ja utilizado por outro usuario');
+    }
+
+    return this.prisma.userProfile.update({
+      where: { cpf },
+      data,
+      select: { chatId: true, name: true, email: true, cpf: true, subscriptionPlan: true },
+    });
+  }
+
+  async changePasswordByCpf(cpf: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.userProfile.findUnique({ where: { cpf } });
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('Credenciais invalidas');
+    }
+
+    const ok = await verifyPassword(dto.currentPassword, user.passwordHash, this.passwordPepper);
+    if (!ok) throw new UnauthorizedException('Senha atual incorreta');
+
+    const newHash = await hashPassword(dto.newPassword, this.passwordPepper);
+    await this.prisma.userProfile.update({
+      where: { cpf },
+      data: { passwordHash: newHash },
+    });
+
+    return { ok: true };
   }
 }

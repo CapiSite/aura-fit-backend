@@ -50,11 +50,6 @@ export class WhatsappService {
     return normalized;
   }
 
-  /**
-   * Z-API sometimes wraps the messages array inside different envelope keys.
-   * This normalizer keeps the controller contract consistent by always
-   * returning an array to the caller.
-   */
   private normalizeMessagesResponse(payload: any) {
     if (Array.isArray(payload)) {
       return payload;
