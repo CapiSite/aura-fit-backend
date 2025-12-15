@@ -12,8 +12,8 @@ export class UsersService {
     const data = {
       chatId: String(createUserDto.chatId),
       name: createUserDto.name,
-      cpf: createUserDto.cpf,
-      email: createUserDto.email ?? `${createUserDto.cpf}@aura.local`,
+      cpf: createUserDto.cpf ?? null,
+      email: createUserDto.email ?? `${createUserDto.chatId}@aura.local`,
       subscriptionPlan: createUserDto.subscriptionPlan ?? 'FREE',
       requestsToday: 0,
       requestsLastReset: new Date(),

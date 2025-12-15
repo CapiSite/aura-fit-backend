@@ -1,5 +1,4 @@
-import { IsString } from 'class-validator';
-import { IsIn } from 'class-validator';
+import { IsString, IsOptional, IsIn } from 'class-validator';
 import { SubscriptionPlan } from '@prisma/client';
 
 export class CreateUserDto {
@@ -9,8 +8,9 @@ export class CreateUserDto {
   @IsString()
   name: string;
 
+  @IsOptional()
   @IsString()
-  cpf: string;
+  cpf?: string;
 
   @IsString()
   email?: string;

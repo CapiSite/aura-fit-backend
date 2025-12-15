@@ -147,6 +147,33 @@ export class WhatsappService {
     return Boolean(profile);
   }
 
+  private async ensureUserProfile(chatId: string) {
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    return this.prisma.userProfile.upsert({
+      where: { chatId },
+      update: {
+        subscriptionPlan: 'FREE',
+        subscriptionExpiresAt: expiresAt,
+      },
+      create: {
+        chatId,
+        cpf: null,
+        email: `${chatId}@whatsapp.local`,
+        name: 'Usuário WhatsApp',
+        goals: [],
+        dietaryRestrictions: [],
+        preferences: [],
+        allergies: [],
+        medicalConditions: [],
+        medications: [],
+        subscriptionPlan: 'FREE',
+        subscriptionExpiresAt: expiresAt,
+        requestsToday: 0,
+        requestsLastReset: new Date(),
+      },
+    });
+  }
+
   async handleWebhook(payload: WebhookEventDto) {
     const phone = this.extractPhoneFromWebhook(payload);
     if (phone) {
@@ -159,12 +186,11 @@ export class WhatsappService {
       hasMessage: Boolean(payload?.message),
     });
 
-    // Check if it is a text message from user
     const textMessage =
       payload?.message?.text?.message ||
       payload?.text?.message ||
       payload?.message?.caption ||
-      payload?.caption; // Caption for images
+      payload?.caption;
     let imageUrl =
       payload?.message?.imageUrl || payload?.imageUrl || payload?.image;
 
@@ -179,7 +205,6 @@ export class WhatsappService {
       imageUrl = imageUrl.url;
     }
 
-    // Fallback: if still an object, try to find a string property or reset
     if (typeof imageUrl === 'object') {
       console.warn(
         'DEBUG: imageUrl is still an object, trying to extract string...',
@@ -203,11 +228,35 @@ export class WhatsappService {
         this.registerMessageKey(messageKey);
       }
 
-      const authorized = await this.isAuthorizedPhone(phone);
-      if (!authorized) {
-        console.log(`Ignoring message from unregistered phone: ${phone}`);
+      const chatId = this.tryParseChatId(phone);
+      if (!chatId) {
+        console.log(`Unable to parse chatId from phone: ${phone}`);
         return { received: true };
       }
+
+      let user = await this.prisma.userProfile.findUnique({
+        where: { chatId },
+      });
+
+      if (!user) {
+        console.log(`Creating profile for unregistered phone: ${phone}`);
+        user = await this.ensureUserProfile(chatId);
+      }
+
+      // Check for plan expiration
+      if (
+        user.subscriptionExpiresAt &&
+        user.subscriptionExpiresAt < new Date()
+      ) {
+        console.log(`Plan expired for user ${phone}`);
+        await this.sendText({
+          phone,
+          message:
+            'Seu plano venceu. Por favor, renove sua assinatura para continuar utilizando o serviço.',
+        });
+        return { received: true };
+      }
+
       console.log(
         `Received message from ${phone}: ${textMessage || '[Image]'} ${imageUrl ? `(Image: ${imageUrl})` : ''}`,
       );

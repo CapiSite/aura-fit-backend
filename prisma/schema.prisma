@@ -34,7 +34,7 @@ model UserProfile {
   notes                        String?
   createdAt                    DateTime         @default(now())
   updatedAt                    DateTime         @updatedAt
-  cpf                          String           @unique
+  cpf                          String?          @unique
   isPaymentActive              Boolean          @default(false)
   lastPaymentAt                DateTime?
   nextBillingAt                DateTime?
@@ -44,7 +44,7 @@ model UserProfile {
   requestsLastReset            DateTime?
   requestsToday                Int              @default(0)
   passwordHash                 String?
-  email                        String
+  email                        String?
   role                         Role             @default(USER)
   waterReminderEnabled         Boolean          @default(true)
   waterReminderIntervalMinutes Int              @default(180)

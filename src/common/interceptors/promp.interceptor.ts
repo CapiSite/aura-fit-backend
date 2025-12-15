@@ -34,9 +34,9 @@ export class PromptInterceptor implements MessageInterceptor {
       userProfile = await this.prisma.userProfile.create({
         data: {
           chatId,
-          cpf: String(chatId),
-          email: `${chatId}@aura.local`,
-          name: message.from?.first_name ?? 'Usuário',
+          cpf: null,
+          email: null,
+          name: message.from?.first_name ?? null,
           goals: [],
           dietaryRestrictions: [],
           preferences: [],
