@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common'
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaService } from 'src/prisma_connection/prisma.service'
 import crypto from 'crypto'
 import { hashPassword, verifyPassword } from 'src/common/security/bcrypt'
+import { SubscriptionPlan } from '@prisma/client'
 
 @Injectable()
 export class AuthService {
@@ -19,36 +20,60 @@ export class AuthService {
     return `${data}.${sig}`
   }
 
-  private verifyToken(token: string): any | null {
-    const secret = this.config.get<string>('AUTH_SECRET') ?? 'dev-secret'
-    const [data, sig] = token.split('.')
-    if (!data || !sig) return null
-    const expected = crypto.createHmac('sha256', secret).update(data).digest('hex')
-    if (expected !== sig) return null
-    try {
-      return JSON.parse(Buffer.from(data, 'base64url').toString('utf8'))
-    } catch {
-      return null
-    }
-  }
+  async register(email: string, password: string, name?: string, cpf?: string, phone?: string, _subscriptionPlan?: string) {
+    if (!email || !password) throw new BadRequestException('E-mail e senha sao obrigatorios')
 
-  async register(email: string, password: string) {
-    if (!email || !password) throw new BadRequestException('E-mail e senha são obrigatórios')
-    const user = await this.prisma.userProfile.findFirst({ where: { email } as any })
-    if (!user) throw new BadRequestException('Usuário não encontrado para este e-mail')
+    const cleanCpf = (cpf || '').replace(/\D/g, '')
+    const cleanPhone = (phone || '').replace(/\D/g, '')
+    const chatId = cleanPhone || cleanCpf || email
+    const displayName = name?.trim() || email.split('@')[0] || 'Usuario'
     const hash = await hashPassword(password, this.passwordPepper)
-    await this.prisma.userProfile.updateMany({ where: { email } as any, data: { passwordHash: hash } })
-    return { ok: true }
+
+    try {
+      const existing = await this.prisma.userProfile.findFirst({
+        where: { OR: [{ email }, { cpf: cleanCpf }] } as any,
+      })
+      if (existing) throw new ConflictException('CPF ou email ja cadastrado')
+
+      const created = await this.prisma.userProfile.create({
+        data: {
+          chatId: String(chatId),
+          name: displayName,
+          cpf: cleanCpf || String(chatId),
+          email,
+          subscriptionPlan: SubscriptionPlan.FREE,
+          requestsToday: 0,
+          requestsLastReset: new Date(),
+          passwordHash: hash,
+        },
+      })
+      const exp = Date.now() + 24 * 60 * 60 * 1000
+      const role = (created as any).role ?? 'USER'
+      const token = this.signToken({ email, cpf: created.cpf, role, exp })
+      return { token, role }
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new ConflictException('CPF ou email ja cadastrado')
+      }
+      throw new BadRequestException('Erro ao registrar usuario')
+    }
   }
 
   async login(email: string, password: string) {
     const user = await this.prisma.userProfile.findFirst({ where: { email } as any })
-    if (!user || !user.passwordHash) throw new UnauthorizedException('Credenciais inválidas')
+    if (!user || !user.passwordHash) throw new UnauthorizedException('Credenciais invalidas')
     const ok = await verifyPassword(password, user.passwordHash, this.passwordPepper)
-    if (!ok) throw new UnauthorizedException('Credenciais inválidas')
+    if (!ok) throw new UnauthorizedException('Credenciais invalidas')
     const exp = Date.now() + 24 * 60 * 60 * 1000
     const role = (user as any).role ?? 'USER'
     const token = this.signToken({ email, cpf: user.cpf, role, exp })
     return { token, role }
+  }
+
+  async forgotPassword(email: string) {
+    if (!email) throw new BadRequestException('E-mail e obrigatorio')
+    // Busca o usuario; resposta generica para nao expor existencia
+    await this.prisma.userProfile.findFirst({ where: { email } as any })
+    return { ok: true, message: 'Se o e-mail existir, enviamos instrucoes' }
   }
 }

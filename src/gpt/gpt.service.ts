@@ -122,6 +122,7 @@ export class GptService {
         ...(resetNeeded ? { requestsLastReset: now } : {}),
       },
     });
+    await this.upsertPromptUsage(prismaChatId, now);
     const profileForContext = {
       ...profile,
       requestsToday: updatedRequestsToday,
@@ -336,5 +337,18 @@ export class GptService {
       (_, value) => (typeof value === 'bigint' ? value.toString() : value),
       2,
     );
+  }
+
+  private startOfUtcDay(date: Date): Date {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  }
+
+  private async upsertPromptUsage(chatId: string, at: Date) {
+    const day = this.startOfUtcDay(at);
+    await this.prisma.promptUsage.upsert({
+      where: { chatId_date: { chatId, date: day } },
+      update: { count: { increment: 1 } },
+      create: { chatId, date: day, count: 1 },
+    });
   }
 }

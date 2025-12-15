@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import telegramConfig from 'src/config/telegram.config';
 import gptConfig from 'src/config/gpt.config';
 import whatsappConfig from 'src/config/whatsapp.config';
+import asaasConfig from 'src/config/asaas.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TelegramModule } from 'src/telegram/telegram.module';
@@ -12,21 +13,27 @@ import { AuthModule } from 'src/auth/auth.module';
 import { UsersModule } from 'src/users/users.module';
 import { PrismaModule } from 'src/prisma_connection/prisma.module';
 import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
+import { AsaasModule } from 'src/asaas/asaas.module';
 
 @Module({
   imports: [
     PrismaModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [// telegramConfig,
-         gptConfig, whatsappConfig],
+      load: [
+        // telegramConfig,
+        gptConfig,
+        whatsappConfig,
+        asaasConfig,
+      ],
     }),
     //TelegramModule,
     GptModule,
     // GeminiModule,
     AuthModule,
     UsersModule,
-    WhatsappModule
+    WhatsappModule,
+    AsaasModule,
   ],
   controllers: [AppController],
   providers: [AppService],

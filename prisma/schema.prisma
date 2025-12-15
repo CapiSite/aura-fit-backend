@@ -52,6 +52,7 @@ model UserProfile {
   meals                        Meal[]
   payments                     Payment[]
   userMetricLogs               UserMetricLog[]
+  promptUsages                 PromptUsage[]
 
   @@map("user_profile")
   @@schema("aura")
@@ -94,6 +95,20 @@ model Payment {
   user   UserProfile      @relation(fields: [chatId], references: [chatId])
 
   @@map("payment")
+  @@schema("aura")
+}
+
+model PromptUsage {
+  id        Int         @id @default(autoincrement())
+  chatId    String
+  date      DateTime
+  count     Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      UserProfile @relation(fields: [chatId], references: [chatId])
+
+  @@unique([chatId, date], name: "chatId_date")
+  @@map("prompt_usage")
   @@schema("aura")
 }
 
