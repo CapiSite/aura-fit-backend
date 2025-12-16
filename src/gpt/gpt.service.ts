@@ -84,7 +84,7 @@ export class GptService {
     if (!profile) {
       return 'Perfil não encontrado.';
     }
-    const limits: Record<string, number> = { FREE: 4, PLUS: 10, PRO: 20 };
+    const limits: Record<string, number> = { FREE: 20, PLUS: 20, PRO: 40 };
     const last = profile.requestsLastReset ?? now;
     const resetNeeded =
       last.getUTCFullYear() !== now.getUTCFullYear() ||
@@ -112,7 +112,7 @@ export class GptService {
     }
     const requestsToday = resetNeeded ? 0 : profile.requestsToday ?? 0;
     if (requestsToday >= limit) {
-      return 'Você atingiu o limite diário do seu plano.';
+      return 'Você atingiu o limite diário do seu plano. Confira o seu plano no dashboard para mais informações. Link: https://aurafit.ia.br';
     }
     const updatedRequestsToday = requestsToday + 1;
     await this.prisma.userProfile.update({
@@ -186,7 +186,7 @@ export class GptService {
 
           console.log('GPT Assistants: run started', run.id);
 
-          for (;;) {
+          for (; ;) {
             const currentRun = await this.client.beta.threads.runs.retrieve(
               run.id,
               { thread_id: threadId },
