@@ -2,11 +2,11 @@ import { Injectable, ConflictException, NotFoundException, BadRequestException, 
 import { ConfigService } from '@nestjs/config';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 import { SubscriptionPlan, UserProfile } from '@prisma/client';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { hashPassword, verifyPassword } from 'src/common/security/bcrypt';
+import { hashPassword, verifyPassword } from '../common/security/bcrypt';
 
 @Injectable()
 export class UsersService {

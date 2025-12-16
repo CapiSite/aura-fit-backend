@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
-import { UsersService } from 'src/users/users.service';
+import { UsersService } from '../users/users.service';
 
 export interface MessageInterceptor {
   handle(

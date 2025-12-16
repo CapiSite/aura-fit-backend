@@ -2,12 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import TelegramBot from 'node-telegram-bot-api';
-import { TelegramService } from 'src/telegram/telegram.service';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { TelegramService } from '../telegram/telegram.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
-import { UsersService } from 'src/users/users.service';
-import { McpService } from 'src/mcp/mcp.service';
+import { UsersService } from '../users/users.service';
+import { McpService } from '../mcp/mcp.service';
 
 @Injectable()
 export class GptService {

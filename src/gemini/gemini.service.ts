@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import TelegramBot from 'node-telegram-bot-api';
-import { TelegramService } from 'src/telegram/telegram.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { CreateGeminiDto } from './dto/create-gemini.dto';
 
 @Injectable()

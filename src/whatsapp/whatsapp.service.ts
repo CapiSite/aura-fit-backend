@@ -7,8 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
-import { GptService } from 'src/gpt/gpt.service';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { GptService } from '../gpt/gpt.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 

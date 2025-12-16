@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 
 type Tool = {
   name: string;

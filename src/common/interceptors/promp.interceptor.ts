@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TelegramBot from 'node-telegram-bot-api';
-import { MessageInterceptor } from 'src/telegram/telegram.service';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { MessageInterceptor } from '../../telegram/telegram.service';
+import { PrismaService } from '../../prisma_connection/prisma.service';
 import { UserProfile } from '@prisma/client';
-import { UsersService } from 'src/users/users.service';
+import { UsersService } from '../../users/users.service';
 
 @Injectable()
 export class PromptInterceptor implements MessageInterceptor {

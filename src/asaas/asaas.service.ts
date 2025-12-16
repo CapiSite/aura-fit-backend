@@ -4,7 +4,7 @@ import { SubscriptionPlan } from '@prisma/client';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
 import { AsaasCustomer, AsaasPayment } from './entities/asaas.types';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 
 @Injectable()
 export class AsaasService {
