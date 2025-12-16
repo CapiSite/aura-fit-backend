@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
@@ -8,7 +13,8 @@ import { PrismaService } from 'src/prisma_connection/prisma.service';
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
 @Injectable()
-export class WhatsappService {
+export class WhatsappService implements OnModuleInit {
+  private readonly logger = new Logger(WhatsappService.name);
   private readonly instanceId: string;
   private readonly token: string;
   private readonly clientToken: string;
@@ -25,6 +31,58 @@ export class WhatsappService {
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
     this.clientToken =
       this.configService.get<string>('whatsapp.clientToken') ?? '';
+  }
+
+  async onModuleInit() {
+    this.logger.log(
+      'WhatsappModule initialized. Checking for active users to send welcome message...',
+    );
+    // Aguarda um curto período para garantir que tudo esteja conectado
+    setTimeout(() => {
+      this.sendInitialMessageToActiveUsers();
+    }, 5000);
+  }
+
+  private async sendInitialMessageToActiveUsers() {
+    try {
+      const activeUsers = await this.prisma.userProfile.findMany({
+        where: {
+          subscriptionExpiresAt: {
+            gt: new Date(),
+          },
+        },
+      });
+
+      this.logger.log(
+        `Found ${activeUsers.length} active users to send welcome message.`,
+      );
+
+      for (const user of activeUsers) {
+        if (!user.chatId) continue;
+
+        try {
+          // Normaliza o telefone para garantir formato correto
+          const phone = this.normalizePhone(user.chatId);
+
+          await this.sendText({
+            phone,
+            message:
+              'Olá! A Aura está online e pronta para ajudar. Se precisar de algo, é só chamar!',
+          });
+          this.logger.log(`Active status message sent to ${phone}`);
+
+          // Pequeno delay para evitar rate limiting
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } catch (err) {
+          this.logger.error(
+            `Failed to send active status message to ${user.chatId}`,
+            err,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error in sendInitialMessageToActiveUsers', error);
+    }
   }
 
   private get baseUrl() {

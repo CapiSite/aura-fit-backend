@@ -51,8 +51,8 @@ model UserProfile {
   waterReminderLastSent        DateTime?
   meals                        Meal[]
   payments                     Payment[]
-  userMetricLogs               UserMetricLog[]
   promptUsages                 PromptUsage[]
+  userMetricLogs               UserMetricLog[]
 
   @@map("user_profile")
   @@schema("aura")
