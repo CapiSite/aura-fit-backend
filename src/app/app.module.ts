@@ -8,7 +8,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TelegramModule } from '../telegram/telegram.module';
 import { GptModule } from '../gpt/gpt.module';
-// import { GeminiModule } from '../gemini/gemini.module';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { PrismaModule } from '../prisma_connection/prisma.module';
@@ -29,7 +28,6 @@ import { AsaasModule } from '../asaas/asaas.module';
     }),
     //TelegramModule,
     GptModule,
-    // GeminiModule,
     AuthModule,
     UsersModule,
     WhatsappModule,

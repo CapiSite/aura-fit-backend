@@ -53,6 +53,12 @@ export class GptService {
       return;
     }
 
+    // Bloquear mensagens de grupos - apenas responder mensagens privadas
+    if (message.chat.type !== 'private') {
+      console.log(`Mensagem de grupo ignorada. Chat type: ${message.chat.type}, chatId: ${chatId}`);
+      return;
+    }
+
     if (text.startsWith('/start')) {
       const firstName = message.from?.first_name ?? 'amigo';
       await this.telegramService.sendMessage(
