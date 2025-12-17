@@ -4,6 +4,9 @@ import {
   OnModuleInit,
   Logger,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { ConfigService } from '@nestjs/config';
 import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
@@ -20,6 +23,10 @@ export class WhatsappService implements OnModuleInit {
   private readonly clientToken: string;
   private readonly webhookMessages = new Map<string, any[]>();
   private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
+  private readonly lockFilePath = path.join(
+    os.tmpdir(),
+    'aura_whatsapp_startup.lock',
+  );
 
   constructor(
     private readonly configService: ConfigService,
@@ -34,13 +41,47 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    this.logger.log(
-      'WhatsappModule initialized. Checking for active users to send welcome message...',
-    );
+    this.logger.log('WhatsappModule initialized.');
+
+    if (this.shouldSkipStartupMessage()) {
+      this.logger.warn(
+        'Startup message skipped due to debounce (sent recently).',
+      );
+      return;
+    }
+
+    this.logger.log('Scheduling startup message...');
     // Aguarda um curto período para garantir que tudo esteja conectado
     setTimeout(() => {
       this.sendInitialMessageToActiveUsers();
+      this.updateLockFile();
     }, 5000);
+  }
+
+  private shouldSkipStartupMessage(): boolean {
+    try {
+      if (!fs.existsSync(this.lockFilePath)) {
+        return false;
+      }
+      const stats = fs.statSync(this.lockFilePath);
+      const now = Date.now();
+      const lastModified = stats.mtimeMs;
+      // Debounce window: 15 minutes
+      const debounceWindow = 15 * 60 * 1000;
+
+      return now - lastModified < debounceWindow;
+    } catch (error) {
+      this.logger.error('Error checking lock file', error);
+      return false;
+    }
+  }
+
+  private updateLockFile() {
+    try {
+      fs.writeFileSync(this.lockFilePath, new Date().toISOString());
+    } catch (error) {
+      this.logger.error('Error updating lock file', error);
+    }
   }
 
   private async sendInitialMessageToActiveUsers() {
@@ -200,19 +241,20 @@ export class WhatsappService implements OnModuleInit {
     return Boolean(profile);
   }
 
-  private async ensureUserProfile(chatId: string) {
+  private async ensureUserProfile(chatId: string, name?: string) {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     return this.prisma.userProfile.upsert({
       where: { chatId },
       update: {
         subscriptionPlan: 'FREE',
         subscriptionExpiresAt: expiresAt,
+        ...(name ? { name } : {}),
       },
       create: {
         chatId,
         cpf: null,
-        email: `${chatId}@whatsapp.local`,
-        name: 'Usuário WhatsApp',
+        email: null,
+        name: name || 'Usuário WhatsApp',
         goals: [],
         dietaryRestrictions: [],
         preferences: [],
@@ -291,9 +333,24 @@ export class WhatsappService implements OnModuleInit {
         where: { chatId },
       });
 
+      const senderName =
+        payload?.senderName ||
+        payload?.message?.senderName ||
+        payload?.data?.senderName;
+
+      // Update name if we have a senderName and the current name is the default
+      if (user && senderName && user.name === 'Usuário WhatsApp') {
+        await this.prisma.userProfile.update({
+          where: { chatId },
+          data: { name: senderName },
+        });
+      }
+
       if (!user) {
-        console.log(`Creating profile for unregistered phone: ${phone}`);
-        user = await this.ensureUserProfile(chatId);
+        console.log(
+          `Creating profile for unregistered phone: ${phone}, name: ${senderName}`,
+        );
+        user = await this.ensureUserProfile(chatId, senderName);
       }
 
       // Check for plan expiration

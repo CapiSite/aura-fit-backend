@@ -80,6 +80,11 @@ export class PromptInterceptor implements MessageInterceptor {
 
     // Adiciona instruções dinâmicas com base nos dados faltantes
     const instructions: string[] = [];
+    if (!profile.name || profile.name.includes('Usuário WhatsApp')) {
+      instructions.push(
+        'Se for relevante ou caso o usuário não tenha um nome válido, pergunte o nome do usuário. Sempre atualize utilizando o updateUserProfile.',
+      );
+    }
     if (!profile.weight) {
       instructions.push(
         'Se for relevante, pergunte o peso do usuário. Sempre atualize utilizando o updateUserProfile.',

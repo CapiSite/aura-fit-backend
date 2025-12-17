@@ -53,5 +53,9 @@ export class WebhookEventDto {
   @IsObject()
   text?: Record<string, any>;
 
+  @IsOptional()
+  @IsString()
+  senderName?: string;
+
   [key: string]: any;
 }
