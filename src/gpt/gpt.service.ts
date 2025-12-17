@@ -2,12 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import TelegramBot from 'node-telegram-bot-api';
-import { TelegramService } from 'src/telegram/telegram.service';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { TelegramService } from '../telegram/telegram.service';
+import { PrismaService } from '../prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
-import { UsersService } from 'src/users/users.service';
-import { McpService } from 'src/mcp/mcp.service';
+import { UsersService } from '../users/users.service';
+import { McpService } from '../mcp/mcp.service';
 
 @Injectable()
 export class GptService {
@@ -53,6 +53,12 @@ export class GptService {
       return;
     }
 
+    // Bloquear mensagens de grupos - apenas responder mensagens privadas
+    if (message.chat.type !== 'private') {
+      console.log(`Mensagem de grupo ignorada. Chat type: ${message.chat.type}, chatId: ${chatId}`);
+      return;
+    }
+
     if (text.startsWith('/start')) {
       const firstName = message.from?.first_name ?? 'amigo';
       await this.telegramService.sendMessage(
@@ -84,7 +90,7 @@ export class GptService {
     if (!profile) {
       return 'Perfil não encontrado.';
     }
-    const limits: Record<string, number> = { FREE: 4, PLUS: 10, PRO: 20 };
+    const limits: Record<string, number> = { FREE: 20, PLUS: 20, PRO: 40 };
     const last = profile.requestsLastReset ?? now;
     const resetNeeded =
       last.getUTCFullYear() !== now.getUTCFullYear() ||
@@ -112,7 +118,7 @@ export class GptService {
     }
     const requestsToday = resetNeeded ? 0 : profile.requestsToday ?? 0;
     if (requestsToday >= limit) {
-      return 'Você atingiu o limite diário do seu plano.';
+      return 'Você atingiu o limite diário do seu plano. Confira o seu plano no dashboard para mais informações. Link: https://aurafit.ia.br';
     }
     const updatedRequestsToday = requestsToday + 1;
     await this.prisma.userProfile.update({
@@ -186,7 +192,7 @@ export class GptService {
 
           console.log('GPT Assistants: run started', run.id);
 
-          for (;;) {
+          for (; ;) {
             const currentRun = await this.client.beta.threads.runs.retrieve(
               run.id,
               { thread_id: threadId },

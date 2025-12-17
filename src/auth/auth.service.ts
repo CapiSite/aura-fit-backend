@@ -1,8 +1,8 @@
 import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { PrismaService } from 'src/prisma_connection/prisma.service'
+import { PrismaService } from '../prisma_connection/prisma.service';
 import crypto from 'crypto'
-import { hashPassword, verifyPassword } from 'src/common/security/bcrypt'
+import { hashPassword, verifyPassword } from '../common/security/bcrypt';
 import { SubscriptionPlan } from '@prisma/client'
 
 @Injectable()

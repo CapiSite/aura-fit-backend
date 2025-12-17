@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { McpService } from './mcp.service';
 import { McpController } from './mcp.controller';
-import { PrismaModule } from 'src/prisma_connection/prisma.module';
+import { PrismaModule } from '../prisma_connection/prisma.module';
 
 @Module({
   imports: [PrismaModule],

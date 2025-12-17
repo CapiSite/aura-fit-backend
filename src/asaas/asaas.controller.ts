@@ -2,8 +2,8 @@ import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards } from '@ne
 import { AsaasService } from './asaas.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreatePlanPaymentDto, PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
-import { UsersService } from 'src/users/users.service';
-import { AuthGuard } from 'src/common/guards/auth.guard';
+import { UsersService } from '../users/users.service';
+import { AuthGuard } from '../common/guards/auth.guard';
 
 @UseGuards(AuthGuard)
 @Controller('asaas')

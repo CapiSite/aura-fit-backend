@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappController } from './whatsapp.controller';
 
-import { GptModule } from 'src/gpt/gpt.module';
+import { GptModule } from '../gpt/gpt.module';
 
 @Module({
   controllers: [WhatsappController],

@@ -1,19 +1,18 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import telegramConfig from 'src/config/telegram.config';
-import gptConfig from 'src/config/gpt.config';
-import whatsappConfig from 'src/config/whatsapp.config';
-import asaasConfig from 'src/config/asaas.config';
+import telegramConfig from '../config/telegram.config';
+import gptConfig from '../config/gpt.config';
+import whatsappConfig from '../config/whatsapp.config';
+import asaasConfig from '../config/asaas.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { TelegramModule } from 'src/telegram/telegram.module';
-import { GptModule } from 'src/gpt/gpt.module';
-// import { GeminiModule } from 'src/gemini/gemini.module';
-import { AuthModule } from 'src/auth/auth.module';
-import { UsersModule } from 'src/users/users.module';
-import { PrismaModule } from 'src/prisma_connection/prisma.module';
-import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
-import { AsaasModule } from 'src/asaas/asaas.module';
+import { TelegramModule } from '../telegram/telegram.module';
+import { GptModule } from '../gpt/gpt.module';
+import { AuthModule } from '../auth/auth.module';
+import { UsersModule } from '../users/users.module';
+import { PrismaModule } from '../prisma_connection/prisma.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { AsaasModule } from '../asaas/asaas.module';
 
 @Module({
   imports: [
@@ -29,7 +28,6 @@ import { AsaasModule } from 'src/asaas/asaas.module';
     }),
     //TelegramModule,
     GptModule,
-    // GeminiModule,
     AuthModule,
     UsersModule,
     WhatsappModule,

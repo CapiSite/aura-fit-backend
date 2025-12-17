@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from 'src/prisma_connection/prisma.service';
+import { PrismaService } from '../../prisma_connection/prisma.service';
 import crypto from 'crypto';
 
 @Injectable()
