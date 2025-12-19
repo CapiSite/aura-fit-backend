@@ -35,6 +35,8 @@ export class AuthService {
       })
       if (existing) throw new ConflictException('CPF ou email ja cadastrado')
 
+      const trialDays = 3
+      const trialExpiresAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
       const created = await this.prisma.userProfile.create({
         data: {
           chatId: String(chatId),
@@ -42,6 +44,8 @@ export class AuthService {
           cpf: cleanCpf || String(chatId),
           email,
           subscriptionPlan: SubscriptionPlan.FREE,
+          subscriptionExpiresAt: trialExpiresAt,
+          isPaymentActive: false,
           requestsToday: 0,
           requestsLastReset: new Date(),
           passwordHash: hash,

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { SubscriptionPlan } from '@prisma/client';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
-import { AsaasCustomer, AsaasPayment } from './entities/asaas.types';
+import { AsaasCustomer, AsaasPayment, AsaasWebhookPayload } from './entities/asaas.types';
 import { PrismaService } from '../prisma_connection/prisma.service';
 
 @Injectable()
@@ -14,9 +14,10 @@ export class AsaasService {
   private readonly webhookToken: string;
 
   constructor(private readonly configService: ConfigService, private readonly prisma: PrismaService) {
-    this.baseUrl =
+    const rawBaseUrl =
       this.configService.get<string>('asaas.baseUrl') ??
       'https://sandbox.asaas.com/api/v3';
+    this.baseUrl = this.normalizeBaseUrl(rawBaseUrl);
     this.apiKey = this.configService.get<string>('asaas.apiKey') ?? '';
     this.webhookToken = this.configService.get<string>('ASAAS_WEBHOOK_TOKEN') ?? '';
   }
@@ -31,7 +32,16 @@ export class AsaasService {
   async createPayment(dto: CreatePaymentInput): Promise<AsaasPayment> {
     const billingType = dto.billingType ?? AsaasBillingType.CREDIT_CARD;
 
-    const payload: any = {
+    const payload: {
+      customer: string;
+      billingType: AsaasBillingType;
+      value: number;
+      dueDate: string;
+      description?: string;
+      externalReference?: string;
+      creditCard?: CreditCardPayload;
+      creditCardHolderInfo?: CreditCardHolderInfoPayload;
+    } = {
       customer: dto.customerId,
       billingType,
       value: dto.value,
@@ -55,15 +65,52 @@ export class AsaasService {
     return this.request<AsaasPayment>(`/payments/${id}`, { method: 'GET' });
   }
 
+  async checkPaymentStatus(id: string, expectedChatId?: string) {
+    const payment = await this.getPayment(id);
+    if (
+      payment?.billingType === AsaasBillingType.PIX &&
+      (!payment?.pixTransaction?.qrCode || !payment?.pixTransaction?.payload)
+    ) {
+      const pix = await this.getPixQrCode(payment.id);
+      if (pix) {
+        payment.pixTransaction = {
+          ...payment.pixTransaction,
+          qrCode: pix.qrCode,
+          payload: pix.payload,
+        };
+      }
+    }
+    const status = this.getPaymentStatus(payment);
+    const { chatId, planCode } = await this.resolvePaymentContext(payment);
+
+    if (expectedChatId && chatId && String(chatId) !== String(expectedChatId)) {
+      throw new HttpException('Pagamento nao pertence ao usuario', HttpStatus.FORBIDDEN);
+    }
+
+    await this.upsertPaymentRecord({
+      payment,
+      status,
+      plan: planCode,
+      chatId,
+    });
+
+    if (['CONFIRMED', 'RECEIVED'].includes(status)) {
+      const updated = await this.applyConfirmedPayment(payment, status);
+      return { status, updated, plan: planCode };
+    }
+
+    return { status, updated: false };
+  }
+
   async createPlanPayment(
     planCode: PlanCode,
     customerId: string,
     opts: {
-      externalReference?: string;
       dueDate?: string;
       paymentMethod?: AsaasBillingType;
       creditCard?: CreditCardPayload;
       holderInfo?: CreditCardHolderInfoPayload;
+      chatId?: string;
     },
   ): Promise<AsaasPayment> {
     const pricing: Record<PlanCode, { value: number; description: string }> = {
@@ -77,8 +124,8 @@ export class AsaasService {
       },
     };
 
-    const plan = pricing[planCode];
-    if (!plan) {
+    const pricingInfo = pricing[planCode];
+    if (!pricingInfo) {
       throw new HttpException('Plano inválido', HttpStatus.BAD_REQUEST);
     }
 
@@ -111,75 +158,228 @@ export class AsaasService {
       }
     }
 
-    const dueDate = opts?.dueDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+    const dueDate = new Date().toISOString().slice(0, 10);
 
     const payload: CreatePaymentInput = {
       customerId,
-      value: plan.value,
+      value: pricingInfo.value,
       dueDate,
-      description: plan.description,
-      externalReference: opts?.externalReference ?? `${planCode}:${customerId}:${Date.now()}`,
+      description: pricingInfo.description,
+      externalReference: `${planCode}:${opts.chatId ?? ''}:${Date.now()}`,
       creditCard: opts.creditCard,
       creditCardHolderInfo: opts.holderInfo,
       billingType,
     };
 
-    return this.createPayment(payload);
+    const payment = await this.createPayment(payload);
+    if (billingType === AsaasBillingType.PIX) {
+      const pix = await this.getPixQrCode(payment.id);
+      if (pix) {
+        payment.pixTransaction = {
+          ...payment.pixTransaction,
+          qrCode: pix.qrCode,
+          payload: pix.payload,
+        };
+      }
+    }
+    const status = this.getPaymentStatus(payment);
+    const planEnum = this.mapPlanCode(planCode);
+    const contextChatId = opts.chatId ?? this.extractPaymentContext(payment).chatId;
+    const paidAt = ['CONFIRMED', 'RECEIVED'].includes(status) ? this.resolvePaidAt(payment) : null;
+    await this.upsertPaymentRecord({
+      payment,
+      status,
+      plan: planEnum,
+      chatId: contextChatId,
+      paidAt,
+    });
+    if (['CONFIRMED', 'RECEIVED'].includes(status)) {
+      await this.applyConfirmedPayment(payment, status);
+    }
+    return payment;
   }
 
-  async handleWebhook(body: any, token?: string) {
+  async handleWebhook(body: AsaasWebhookPayload | AsaasPayment, token?: string) {
     if (this.webhookToken && token !== this.webhookToken) {
       throw new HttpException('Unauthorized webhook', HttpStatus.UNAUTHORIZED);
     }
 
-    const payment = body?.payment ?? body;
+    const payment = 'payment' in body ? body.payment : body;
     if (!payment) return { ok: false };
 
-    const status = (payment.status ?? '').toString().toUpperCase();
+    const status = this.getPaymentStatus(payment);
     if (!['CONFIRMED', 'RECEIVED'].includes(status)) {
       return { ok: true, ignored: true };
     }
 
-    const ext = (payment.externalReference ?? '').toString();
-    const [planRaw, chatIdFromExt] = ext.split(':');
-    const chatId = chatIdFromExt || (payment?.customer ?? '');
-    const planCode = planRaw?.toUpperCase() === 'PRO' ? SubscriptionPlan.PRO : SubscriptionPlan.PLUS;
+    const updated = await this.applyConfirmedPayment(payment, status);
+    return { ok: true, updated };
+  }
 
-    if (!chatId) {
-      this.logger.warn('Webhook payment without chatId, skipping');
-      return { ok: false };
+  private getPaymentStatus(payment: AsaasPayment): string {
+    return (payment?.status ?? '').toString().toUpperCase();
+  }
+
+  private extractPaymentContext(payment: AsaasPayment): { chatId: string; planCode: SubscriptionPlan } {
+    const ext = (payment?.externalReference ?? '').toString();
+    const [planRaw, chatIdFromExt] = ext.split(':');
+    const planValue = (planRaw ?? '').toString().trim().toUpperCase();
+    const planCode = planValue === 'PRO' ? SubscriptionPlan.PRO : SubscriptionPlan.PLUS;
+    const chatId = chatIdFromExt ?? '';
+    return { chatId: String(chatId ?? ''), planCode };
+  }
+
+  private async resolvePaymentContext(payment: AsaasPayment): Promise<{ chatId: string; planCode: SubscriptionPlan }> {
+    const paymentId = payment?.id;
+    if (paymentId) {
+      const record = await this.prisma.payment.findUnique({
+        where: { asaasPaymentId: paymentId },
+        select: { chatId: true, plan: true },
+      });
+      if (record?.chatId && record?.plan) {
+        return { chatId: String(record.chatId), planCode: record.plan };
+      }
+    }
+    return this.extractPaymentContext(payment);
+  }
+
+  private resolvePaidAt(payment: AsaasPayment): Date {
+    const raw = payment?.confirmedDate ?? payment?.paymentDate ?? payment?.clientPaymentDate;
+    const parsed = raw ? new Date(raw) : new Date();
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  private mapPlanCode(planCode: PlanCode): SubscriptionPlan {
+    return planCode === PlanCode.PRO ? SubscriptionPlan.PRO : SubscriptionPlan.PLUS;
+  }
+
+  private getPlanAmount(planCode: SubscriptionPlan): number {
+    return planCode === SubscriptionPlan.PRO ? 49.9 : 29.9;
+  }
+
+  private parseDate(value?: string): Date | null {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  private async getPixQrCode(paymentId: string): Promise<{ qrCode: string; payload: string } | null> {
+    if (!paymentId) return null;
+    try {
+      const result = await this.request<{ encodedImage?: string; qrCode?: string; payload?: string }>(
+        `/payments/${paymentId}/pixQrCode`,
+        { method: 'GET' },
+      );
+      const qrCode = (result?.encodedImage ?? result?.qrCode ?? '').toString().trim();
+      const payload = (result?.payload ?? '').toString().trim();
+      if (!qrCode && !payload) return null;
+      return { qrCode, payload };
+    } catch (error) {
+      this.logger.warn(`Falha ao obter QR Code PIX para pagamento ${paymentId}`, error as Error);
+      return null;
+    }
+  }
+
+  private async upsertPaymentRecord(params: {
+    payment: AsaasPayment;
+    chatId: string;
+    plan: SubscriptionPlan;
+    status: string;
+    paidAt?: Date | null;
+  }) {
+    const { payment, chatId, plan, status, paidAt } = params;
+    if (!payment?.id || !chatId) {
+      this.logger.warn('Pagamento sem identificador ou chatId, ignorando persistencia');
+      return;
     }
 
-    const paidAt = payment.confirmedDate
-      ? new Date(payment.confirmedDate)
-      : new Date(payment.paymentDate ?? Date.now());
+    const dueDate = this.parseDate(payment.dueDate);
+    const data = {
+      asaasPaymentId: payment.id,
+      chatId: String(chatId),
+      amount: Number(payment.value ?? 0),
+      plan,
+      status,
+      method: payment.billingType ?? 'CREDIT_CARD',
+      invoiceUrl: payment.invoiceUrl ?? null,
+      bankSlipUrl: payment.bankSlipUrl ?? null,
+      transactionReceiptUrl: payment.transactionReceiptUrl ?? null,
+      pixQrCode: payment.pixTransaction?.qrCode ?? null,
+      pixPayload: payment.pixTransaction?.payload ?? null,
+      dueDate,
+    };
+
+    await this.prisma.payment.upsert({
+      where: { asaasPaymentId: payment.id },
+      update: {
+        ...data,
+        ...(paidAt ? { paidAt } : {}),
+      },
+      create: {
+        ...data,
+        paidAt: paidAt ?? null,
+      },
+    });
+  }
+
+  private async applyConfirmedPayment(payment: AsaasPayment, status: string): Promise<boolean> {
+    const { chatId, planCode } = await this.resolvePaymentContext(payment);
+    if (!chatId) {
+      this.logger.warn('Payment without chatId, skipping');
+      return false;
+    }
+
+    const paidAt = this.resolvePaidAt(payment);
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { chatId: String(chatId) },
+      select: { lastPaymentAt: true, subscriptionPlan: true, isPaymentActive: true },
+    });
+
+    if (!profile) {
+      this.logger.warn(`Payment for unknown chatId ${chatId}, skipping`);
+      return false;
+    }
+
+    await this.upsertPaymentRecord({
+      payment,
+      status,
+      plan: planCode,
+      chatId,
+      paidAt,
+    });
+
+    const expectedAmount = this.getPlanAmount(planCode);
+    const receivedAmount = Number(payment.value ?? 0);
+    if (receivedAmount + 0.01 < expectedAmount) {
+      this.logger.warn(
+        `Pagamento abaixo do esperado. paymentId=${payment.id} expected=${expectedAmount} received=${receivedAmount}`,
+      );
+      return false;
+    }
+
+    const alreadyApplied =
+      profile.isPaymentActive &&
+      profile.subscriptionPlan === planCode &&
+      profile.lastPaymentAt &&
+      profile.lastPaymentAt >= paidAt;
+
+    if (alreadyApplied) return false;
+
     const expiresAt = new Date(paidAt);
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    await this.prisma.$transaction([
-      this.prisma.payment.create({
-        data: {
-          chatId: String(chatId),
-          amount: Number(payment.value ?? 0),
-          plan: planCode,
-          status,
-          method: payment.billingType ?? 'CREDIT_CARD',
-          paidAt,
-        },
-      }),
-      this.prisma.userProfile.update({
-        where: { chatId: String(chatId) },
-        data: {
-          subscriptionPlan: planCode,
-          isPaymentActive: true,
-          lastPaymentAt: paidAt,
-          subscriptionExpiresAt: expiresAt,
-          nextBillingAt: expiresAt,
-        },
-      }),
-    ]);
+    await this.prisma.userProfile.update({
+      where: { chatId: String(chatId) },
+      data: {
+        subscriptionPlan: planCode,
+        isPaymentActive: true,
+        lastPaymentAt: paidAt,
+        subscriptionExpiresAt: expiresAt,
+        nextBillingAt: expiresAt,
+      },
+    });
 
-    return { ok: true };
+    return true;
   }
 
   async ensureCustomerFromProfile(profile: {
@@ -199,8 +399,11 @@ export class AsaasService {
 
     try {
       return await this.createCustomer(dto);
-    } catch (error: any) {
-      const status = (typeof error?.getStatus === 'function' && error.getStatus()) || 0;
+    } catch (error: unknown) {
+      const status =
+        typeof (error as { getStatus?: () => number }).getStatus === 'function'
+          ? (error as { getStatus: () => number }).getStatus()
+          : 0;
       if (status === HttpStatus.CONFLICT || status === HttpStatus.BAD_REQUEST) {
         const existing = await this.findCustomerByCpf(profile.cpfCnpj);
         if (existing) return existing;
@@ -211,7 +414,10 @@ export class AsaasService {
 
   private async findCustomerByCpf(cpfCnpj: string): Promise<AsaasCustomer | null> {
     try {
-      const result = await this.request<any>(`/customers?cpfCnpj=${cpfCnpj}`, { method: 'GET' });
+      const result = await this.request<{ data?: AsaasCustomer[]; customers?: AsaasCustomer[] }>(
+        `/customers?cpfCnpj=${cpfCnpj}`,
+        { method: 'GET' },
+      );
       const list: AsaasCustomer[] = result?.data ?? result?.customers ?? [];
       return list[0] ?? null;
     } catch (error) {
@@ -243,7 +449,7 @@ export class AsaasService {
     });
 
     const text = await response.text();
-    let data: any = undefined;
+    let data: unknown = undefined;
     try {
       data = text ? JSON.parse(text) : undefined;
     } catch (parseError) {
@@ -251,9 +457,10 @@ export class AsaasService {
     }
 
     if (!response.ok) {
+      const responseData = data as { errors?: { description?: string }[]; message?: string } | undefined;
       const description =
-        data?.errors?.[0]?.description ||
-        data?.message ||
+        responseData?.errors?.[0]?.description ||
+        responseData?.message ||
         'Erro ao comunicar com o Asaas';
 
       this.logger.error(
@@ -263,8 +470,8 @@ export class AsaasService {
 
       const userMessage =
         response.status === HttpStatus.BAD_REQUEST ||
-        response.status === HttpStatus.PAYMENT_REQUIRED ||
-        response.status === HttpStatus.UNPROCESSABLE_ENTITY
+          response.status === HttpStatus.PAYMENT_REQUIRED ||
+          response.status === HttpStatus.UNPROCESSABLE_ENTITY
           ? 'Dados de pagamento invalidos. Verifique as informacoes e tente novamente.'
           : 'Nao foi possivel processar o pagamento agora. Tente novamente em instantes.';
 
@@ -275,6 +482,16 @@ export class AsaasService {
     }
 
     return data as T;
+  }
+
+  private normalizeBaseUrl(value: string): string {
+    const trimmed = value.trim().replace(/\/+$/, '');
+    if (!trimmed) return 'https://sandbox.asaas.com/api/v3';
+    const collapsed = trimmed.replace(/\/api\/api\/v3$/i, '/api/v3');
+    if (/\/api$/i.test(collapsed)) {
+      return `${collapsed}/v3`;
+    }
+    return collapsed;
   }
 }
 type CreatePaymentInput = {

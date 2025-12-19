@@ -1,23 +1,31 @@
-import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import type { Request } from 'express';
 import { AsaasService } from './asaas.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreatePlanPaymentDto, PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
 import { UsersService } from '../users/users.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import type { AsaasPayment, AsaasWebhookPayload } from './entities/asaas.types';
 
-@UseGuards(AuthGuard)
+type AuthRequest = Request & { user?: { cpf?: string; role?: string } };
+
 @Controller('asaas')
 export class AsaasController {
   constructor(private readonly asaasService: AsaasService, private readonly usersService: UsersService) {}
 
   @Post('customers')
+  @UseGuards(AuthGuard)
   createCustomer(@Body() dto: CreateCustomerDto) {
     return this.asaasService.createCustomer(dto);
   }
 
   @Post('payments/plan')
-  async createPlanPayment(@Req() req: any, @Body() dto: CreatePlanPaymentDto) {
+  @UseGuards(AuthGuard)
+  async createPlanPayment(@Req() req: AuthRequest, @Body() dto: CreatePlanPaymentDto) {
     const cpf = req?.user?.cpf;
+    if (!cpf) {
+      throw new HttpException('CPF nao informado', HttpStatus.BAD_REQUEST);
+    }
     const user = await this.usersService.getMeByCpf(cpf);
 
     const customer = await this.asaasService.ensureCustomerFromProfile({
@@ -33,14 +41,14 @@ export class AsaasController {
     const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
 
     return this.asaasService.createPlanPayment(dto.plan as PlanCode, customer.id, {
-      externalReference: dto.externalReference ?? `${dto.plan}:${user.chatId}`,
       dueDate: dto.dueDate,
       paymentMethod,
+      chatId: user.chatId,
       creditCard:
         paymentMethod === AsaasBillingType.PIX
           ? undefined
           : {
-              holderName: dto.creditCardHolderName ?? user.name,
+              holderName: user.name,
               number: digits(dto.creditCardNumber),
               expiryMonth: month,
               expiryYear: year,
@@ -59,12 +67,30 @@ export class AsaasController {
   }
 
   @Get('payments/:id')
+  @UseGuards(AuthGuard)
   getPayment(@Param('id') id: string) {
     return this.asaasService.getPayment(id);
   }
 
+  @Get('payments/:id/check')
+  @UseGuards(AuthGuard)
+  async checkPayment(@Req() req: AuthRequest, @Param('id') id: string) {
+    const cpf = req?.user?.cpf;
+    if (!cpf) {
+      throw new HttpException('CPF nao informado', HttpStatus.BAD_REQUEST);
+    }
+    const user = await this.usersService.getMeByCpf(cpf);
+    return this.asaasService.checkPaymentStatus(id, user.chatId);
+  }
+
   @Post('webhook')
-  async webhook(@Body() body: any, @Headers('x-webhook-token') token?: string) {
+  async webhook(
+    @Body() body: AsaasWebhookPayload | AsaasPayment,
+    @Headers() headers: Record<string, string | string[]>,
+  ) {
+    const token =
+      (headers?.['asaas-webhook-token'] as string | undefined) ??
+      (headers?.['x-webhook-token'] as string | undefined);
     return this.asaasService.handleWebhook(body, token);
   }
 }

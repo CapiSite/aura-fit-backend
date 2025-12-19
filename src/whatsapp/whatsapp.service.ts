@@ -105,12 +105,13 @@ export class WhatsappService implements OnModuleInit {
           // Normaliza o telefone para garantir formato correto
           const phone = this.normalizePhone(user.chatId);
 
-          await this.sendText({
-            phone,
-            message:
-              'Olá! A Aura está online e pronta para ajudar. Se precisar de algo, é só chamar!',
-          });
-          this.logger.log(`Active status message sent to ${phone}`);
+          // Mensagem de status inicial desativada a pedido do usuario.
+          // await this.sendText({
+          //   phone,
+          //   message:
+          //     'Olá! A Aura está online e pronta para ajudar. Se precisar de algo, é só chamar!',
+          // });
+          // this.logger.log(`Active status message sent to ${phone}`);
 
           // Pequeno delay para evitar rate limiting
           await new Promise((resolve) => setTimeout(resolve, 1000));

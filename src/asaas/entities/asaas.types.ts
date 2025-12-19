@@ -46,6 +46,7 @@ export type AsaasPayment = {
   status: AsaasPaymentStatus;
   dueDate: string;
   originalDueDate?: string;
+  confirmedDate?: string;
   paymentDate?: string;
   clientPaymentDate?: string;
   installmentNumber?: number;
@@ -58,4 +59,9 @@ export type AsaasPayment = {
     payload?: string;
     qrCode?: string;
   };
+};
+
+export type AsaasWebhookPayload = {
+  event?: string;
+  payment: AsaasPayment;
 };

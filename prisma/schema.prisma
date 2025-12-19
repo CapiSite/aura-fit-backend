@@ -85,14 +85,22 @@ model UserMetricLog {
 }
 
 model Payment {
-  id     Int              @id @default(autoincrement())
-  chatId String
-  amount Float
-  plan   SubscriptionPlan
-  status String
-  method String?
-  paidAt DateTime         @default(now())
-  user   UserProfile      @relation(fields: [chatId], references: [chatId])
+  id                    Int              @id @default(autoincrement())
+  chatId                String
+  asaasPaymentId        String?          @unique
+  amount                Float
+  plan                  SubscriptionPlan
+  status                String
+  method                String?
+  invoiceUrl            String?
+  bankSlipUrl           String?
+  transactionReceiptUrl String?
+  pixQrCode             String?
+  pixPayload            String?
+  dueDate               DateTime?
+  createdAt             DateTime         @default(now())
+  paidAt                DateTime?
+  user                  UserProfile      @relation(fields: [chatId], references: [chatId])
 
   @@map("payment")
   @@schema("aura")

@@ -19,6 +19,11 @@ export class UsersService {
   async create(createUserDto: CreateUserDto) {
     const chatId = String(createUserDto.chatId);
     const plan = (createUserDto.subscriptionPlan ?? SubscriptionPlan.FREE) as SubscriptionPlan;
+    const trialDays = 3;
+    const trialExpiresAt =
+      plan === SubscriptionPlan.FREE
+        ? new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
+        : null;
 
     const existing = await this.prisma.userProfile.findFirst({
       where: {
@@ -34,7 +39,10 @@ export class UsersService {
       name: createUserDto.name,
       cpf: createUserDto.cpf ?? null,
       email: createUserDto.email ?? `${createUserDto.chatId}@aura.local`,
-      subscriptionPlan: createUserDto.subscriptionPlan ?? 'FREE',
+      subscriptionPlan: plan,
+      ...(createUserDto.role ? { role: createUserDto.role } : {}),
+      subscriptionExpiresAt: trialExpiresAt,
+      isPaymentActive: false,
       requestsToday: 0,
       requestsLastReset: new Date(),
     };
@@ -151,10 +159,88 @@ export class UsersService {
         email: true,
         subscriptionPlan: true,
         role: true,
+        isPaymentActive: true,
+        lastPaymentAt: true,
+        subscriptionExpiresAt: true,
       },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');
-    return user;
+    const trialStatus = await this.resolveTrialStatus(user);
+    return {
+      ...user,
+      trialEligible: trialStatus.trialEligible,
+      trialActive: trialStatus.trialActive,
+      trialExpired: trialStatus.trialExpired,
+      trialEndsAt: trialStatus.trialEndsAt,
+    };
+  }
+
+  async getInvoicesByCpf(cpf: string) {
+    if (!cpf) throw new BadRequestException('CPF nao informado');
+    const user = await this.prisma.userProfile.findUnique({
+      where: { cpf },
+      select: { chatId: true },
+    });
+    if (!user) throw new NotFoundException('Usuario nao encontrado');
+
+    return this.prisma.payment.findMany({
+      where: { chatId: String(user.chatId) },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        asaasPaymentId: true,
+        status: true,
+        plan: true,
+        method: true,
+        amount: true,
+        invoiceUrl: true,
+        bankSlipUrl: true,
+        transactionReceiptUrl: true,
+        pixQrCode: true,
+        pixPayload: true,
+        dueDate: true,
+        createdAt: true,
+        paidAt: true,
+      },
+    });
+  }
+
+  async startTrialByCpf(cpf: string, trialDays = 3) {
+    if (!cpf) throw new BadRequestException('CPF nao informado');
+    const user = await this.prisma.userProfile.findUnique({
+      where: { cpf },
+      select: {
+        chatId: true,
+        cpf: true,
+        subscriptionPlan: true,
+        isPaymentActive: true,
+        lastPaymentAt: true,
+        subscriptionExpiresAt: true,
+      },
+    });
+    if (!user) throw new NotFoundException('Usuario nao encontrado');
+
+    const trialStatus = await this.resolveTrialStatus(user);
+    if (trialStatus.trialActive) {
+      return { ok: true, status: 'ACTIVE', trialEndsAt: trialStatus.trialEndsAt };
+    }
+    if (!trialStatus.trialEligible) {
+      throw new BadRequestException('Trial indisponivel para este usuario');
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    const updated = await this.prisma.userProfile.update({
+      where: { cpf },
+      data: {
+        subscriptionPlan: SubscriptionPlan.FREE,
+        isPaymentActive: false,
+        subscriptionExpiresAt: expiresAt,
+      },
+      select: { subscriptionExpiresAt: true },
+    });
+
+    return { ok: true, status: 'ACTIVE', trialEndsAt: updated.subscriptionExpiresAt };
   }
 
   async updateProfileFromIA(
@@ -237,5 +323,35 @@ export class UsersService {
     });
 
     return { ok: true };
+  }
+
+  private async resolveTrialStatus(user: {
+    chatId: string;
+    subscriptionPlan: SubscriptionPlan;
+    isPaymentActive: boolean;
+    lastPaymentAt: Date | null;
+    subscriptionExpiresAt: Date | null;
+  }) {
+    const now = new Date();
+    const payment = await this.prisma.payment.findFirst({
+      where: { chatId: String(user.chatId) },
+      select: { id: true },
+    });
+    const hasPaidHistory = !!payment || !!user.lastPaymentAt;
+    const hasPaidPlan =
+      user.subscriptionPlan !== SubscriptionPlan.FREE ||
+      user.isPaymentActive ||
+      hasPaidHistory;
+    const trialEndsAt = user.subscriptionExpiresAt ?? null;
+    const trialActive = !hasPaidPlan && !!trialEndsAt && trialEndsAt > now;
+    const trialExpired = !hasPaidPlan && !!trialEndsAt && trialEndsAt <= now;
+    const trialEligible = !hasPaidPlan && !trialActive && !trialExpired;
+
+    return {
+      trialEligible,
+      trialActive,
+      trialExpired,
+      trialEndsAt,
+    };
   }
 }

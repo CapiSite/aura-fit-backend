@@ -24,10 +24,6 @@ export class CreatePlanPaymentDto {
 
   @ValidateIf((o) => (o.paymentMethod ?? AsaasBillingType.CREDIT_CARD) === AsaasBillingType.CREDIT_CARD)
   @IsString()
-  creditCardHolderName?: string;
-
-  @ValidateIf((o) => (o.paymentMethod ?? AsaasBillingType.CREDIT_CARD) === AsaasBillingType.CREDIT_CARD)
-  @IsString()
   creditCardExpiryMonth?: string;
 
   @ValidateIf((o) => (o.paymentMethod ?? AsaasBillingType.CREDIT_CARD) === AsaasBillingType.CREDIT_CARD)
@@ -37,10 +33,6 @@ export class CreatePlanPaymentDto {
   @ValidateIf((o) => (o.paymentMethod ?? AsaasBillingType.CREDIT_CARD) === AsaasBillingType.CREDIT_CARD)
   @IsString()
   creditCardCcv?: string;
-
-  @IsString()
-  @IsOptional()
-  externalReference?: string;
 
   @IsString()
   @IsOptional()

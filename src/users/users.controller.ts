@@ -36,6 +36,12 @@ export class UsersController {
     return this.usersService.updateMeByCpf(cpf, dto);
   }
 
+  @Post('me/trial')
+  startTrial(@Req() req: any) {
+    const cpf = req?.user?.cpf;
+    return this.usersService.startTrialByCpf(cpf);
+  }
+
   @Post('me/change-password')
   changePassword(@Req() req: any, @Body() dto: ChangePasswordDto) {
     const cpf = req?.user?.cpf;
@@ -52,6 +58,12 @@ export class UsersController {
   meUsage(@Req() req: any) {
     const cpf = req?.user?.cpf;
     return this.usersService.getUsageByCpf(cpf);
+  }
+
+  @Get('me/invoices')
+  meInvoices(@Req() req: any) {
+    const cpf = req?.user?.cpf;
+    return this.usersService.getInvoicesByCpf(cpf);
   }
 
   @Get(':chatId')
