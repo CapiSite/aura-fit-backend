@@ -7,7 +7,7 @@ import { SubscriptionPlan } from '@prisma/client'
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) { }
 
   private get passwordPepper(): string {
     return this.config.get<string>('PASSWORD_PEPPER') ?? 'dev-password-pepper'
@@ -39,10 +39,10 @@ export class AuthService {
       const trialExpiresAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
       const created = await this.prisma.userProfile.create({
         data: {
-          chatId: String(chatId),
           name: displayName,
           cpf: cleanCpf || String(chatId),
           email,
+          phoneNumber: cleanPhone || String(chatId),
           subscriptionPlan: SubscriptionPlan.FREE,
           subscriptionExpiresAt: trialExpiresAt,
           isPaymentActive: false,

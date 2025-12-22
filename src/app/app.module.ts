@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import telegramConfig from '../config/telegram.config';
 import gptConfig from '../config/gpt.config';
 import whatsappConfig from '../config/whatsapp.config';
 import asaasConfig from '../config/asaas.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { TelegramModule } from '../telegram/telegram.module';
 import { GptModule } from '../gpt/gpt.module';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
@@ -20,13 +18,12 @@ import { AsaasModule } from '../asaas/asaas.module';
     ConfigModule.forRoot({
       isGlobal: true,
       load: [
-        // telegramConfig,
         gptConfig,
         whatsappConfig,
         asaasConfig,
       ],
     }),
-    //TelegramModule,
+
     GptModule,
     AuthModule,
     UsersModule,

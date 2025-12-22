@@ -10,7 +10,7 @@ import { hashPassword, verifyPassword } from '../common/security/bcrypt';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) { }
 
   private get passwordPepper(): string {
     return this.config.get<string>('PASSWORD_PEPPER') ?? 'dev-password-pepper';
@@ -27,7 +27,7 @@ export class UsersService {
 
     const existing = await this.prisma.userProfile.findFirst({
       where: {
-        OR: [{ cpf: createUserDto.cpf }, { chatId }],
+        OR: [{ cpf: createUserDto.cpf }, { phoneNumber: chatId }],
       },
     });
     if (existing) {
@@ -39,6 +39,7 @@ export class UsersService {
       name: createUserDto.name,
       cpf: createUserDto.cpf ?? null,
       email: createUserDto.email ?? `${createUserDto.chatId}@aura.local`,
+      phoneNumber: createUserDto.phoneNumber ?? chatId,
       subscriptionPlan: plan,
       ...(createUserDto.role ? { role: createUserDto.role } : {}),
       subscriptionExpiresAt: trialExpiresAt,
@@ -66,7 +67,7 @@ export class UsersService {
 
   async findOne(chatId: string) {
     try {
-      const user = await this.prisma.userProfile.findUnique({ where: { chatId: String(chatId) } });
+      const user = await this.prisma.userProfile.findUnique({ where: { phoneNumber: String(chatId) } });
       if (!user) throw new NotFoundException('Usuario nao encontrado');
       return user;
     } catch {
@@ -78,7 +79,7 @@ export class UsersService {
     const data: any = { ...updateUserDto };
     if (updateUserDto.chatId) data.chatId = String(updateUserDto.chatId);
     try {
-      return await this.prisma.userProfile.update({ where: { chatId: String(chatId) }, data });
+      return await this.prisma.userProfile.update({ where: { phoneNumber: String(chatId) }, data });
     } catch (error: any) {
       if (error?.code === 'P2002') {
         throw new ConflictException('CPF ou chatId ja cadastrado');
@@ -92,7 +93,7 @@ export class UsersService {
 
   async remove(chatId: string) {
     try {
-      return await this.prisma.userProfile.delete({ where: { chatId: String(chatId) } });
+      return await this.prisma.userProfile.delete({ where: { phoneNumber: String(chatId) } });
     } catch (error: any) {
       if (error?.code === 'P2025') {
         throw new NotFoundException('Usuario nao encontrado');
@@ -128,7 +129,7 @@ export class UsersService {
     if (!user) throw new NotFoundException('Usuario nao encontrado');
 
     const usage = await this.prisma.promptUsage.findMany({
-      where: { chatId: user.chatId },
+      where: { userId: user.id },
       orderBy: { date: 'asc' },
       take: 60,
     });
@@ -153,7 +154,8 @@ export class UsersService {
     const user = await this.prisma.userProfile.findUnique({
       where: { cpf },
       select: {
-        chatId: true,
+        id: true,
+        phoneNumber: true,
         name: true,
         cpf: true,
         email: true,
@@ -179,12 +181,12 @@ export class UsersService {
     if (!cpf) throw new BadRequestException('CPF nao informado');
     const user = await this.prisma.userProfile.findUnique({
       where: { cpf },
-      select: { chatId: true },
+      select: { phoneNumber: true, id: true },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');
 
     return this.prisma.payment.findMany({
-      where: { chatId: String(user.chatId) },
+      where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -210,7 +212,8 @@ export class UsersService {
     const user = await this.prisma.userProfile.findUnique({
       where: { cpf },
       select: {
-        chatId: true,
+        id: true,
+        phoneNumber: true,
         cpf: true,
         subscriptionPlan: true,
         isPaymentActive: true,
@@ -249,7 +252,7 @@ export class UsersService {
   ): Promise<UserProfile> {
     const id = String(chatId);
     return this.prisma.userProfile.update({
-      where: { chatId: id },
+      where: { phoneNumber: id },
       data,
     });
   }
@@ -303,7 +306,7 @@ export class UsersService {
     return this.prisma.userProfile.update({
       where: { cpf },
       data,
-      select: { chatId: true, name: true, email: true, cpf: true, subscriptionPlan: true },
+      select: { phoneNumber: true, name: true, email: true, cpf: true, subscriptionPlan: true },
     });
   }
 
@@ -326,7 +329,8 @@ export class UsersService {
   }
 
   private async resolveTrialStatus(user: {
-    chatId: string;
+    phoneNumber: string;
+    id: number;
     subscriptionPlan: SubscriptionPlan;
     isPaymentActive: boolean;
     lastPaymentAt: Date | null;
@@ -334,7 +338,7 @@ export class UsersService {
   }) {
     const now = new Date();
     const payment = await this.prisma.payment.findFirst({
-      where: { chatId: String(user.chatId) },
+      where: { userId: user.id },
       select: { id: true },
     });
     const hasPaidHistory = !!payment || !!user.lastPaymentAt;

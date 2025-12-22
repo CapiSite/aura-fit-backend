@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import TelegramBot from 'node-telegram-bot-api';
-import { TelegramService } from '../telegram/telegram.service';
 import { PrismaService } from '../prisma_connection/prisma.service';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
@@ -18,7 +16,6 @@ export class GptService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly telegramService: TelegramService,
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
     private readonly mcpService: McpService,
@@ -37,41 +34,9 @@ export class GptService {
       this.client = new OpenAI({ apiKey });
       this.model = this.configService.get<string>('gpt.model') ?? 'gpt-4o-mini';
     }
-
-    this.telegramService.onMessage((message) => {
-      void this.handleIncomingMessage(message);
-    });
   }
 
-  private async handleIncomingMessage(
-    message: TelegramBot.Message & { prompt: string },
-  ) {
-    const chatId = message.chat.id;
-    const text = message.text?.trim();
 
-    if (!text) {
-      return;
-    }
-
-    // Bloquear mensagens de grupos - apenas responder mensagens privadas
-    if (message.chat.type !== 'private') {
-      console.log(`Mensagem de grupo ignorada. Chat type: ${message.chat.type}, chatId: ${chatId}`);
-      return;
-    }
-
-    if (text.startsWith('/start')) {
-      const firstName = message.from?.first_name ?? 'amigo';
-      await this.telegramService.sendMessage(
-        chatId,
-        `Olá, ${firstName}! Pode me enviar sua mensagem`,
-      );
-      return;
-    }
-
-    await this.telegramService.sendTypingAction(chatId);
-    const response = await this.generateResponse(message.prompt, chatId);
-    await this.telegramService.sendMessage(chatId, response);
-  }
 
   public async generateResponse(
     prompt: string,
@@ -85,7 +50,7 @@ export class GptService {
     const prismaChatId = String(chatId);
     const now = new Date();
     const profile = await this.prisma.userProfile.findUnique({
-      where: { chatId: prismaChatId },
+      where: { phoneNumber: prismaChatId },
     });
     if (!profile) {
       return 'Perfil não encontrado.';
@@ -98,7 +63,7 @@ export class GptService {
       last.getUTCDate() !== now.getUTCDate();
     if (resetNeeded) {
       await this.prisma.userProfile.update({
-        where: { chatId: prismaChatId },
+        where: { phoneNumber: prismaChatId },
         data: { requestsToday: 0, requestsLastReset: now },
       });
     }
@@ -122,7 +87,7 @@ export class GptService {
     }
     const updatedRequestsToday = requestsToday + 1;
     await this.prisma.userProfile.update({
-      where: { chatId: prismaChatId },
+      where: { phoneNumber: prismaChatId },
       data: {
         requestsToday: updatedRequestsToday,
         ...(resetNeeded ? { requestsLastReset: now } : {}),
@@ -151,7 +116,7 @@ export class GptService {
             console.log('GPT Assistants: thread created', threadId);
             if (profile) {
               await this.prisma.userProfile.update({
-                where: { chatId: prismaChatId },
+                where: { phoneNumber: prismaChatId },
                 data: { assistantThreadId: threadId },
               });
             }
@@ -351,10 +316,22 @@ export class GptService {
 
   private async upsertPromptUsage(chatId: string, at: Date) {
     const day = this.startOfUtcDay(at);
+
+    // Buscar o userId através do phoneNumber
+    const user = await this.prisma.userProfile.findUnique({
+      where: { phoneNumber: chatId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      this.logger.warn(`User not found for chatId ${chatId}, skipping prompt usage`);
+      return;
+    }
+
     await this.prisma.promptUsage.upsert({
-      where: { chatId_date: { chatId, date: day } },
+      where: { userId_date: { userId: user.id, date: day } },
       update: { count: { increment: 1 } },
-      create: { chatId, date: day, count: 1 },
+      create: { userId: user.id, date: day, count: 1 },
     });
   }
 }

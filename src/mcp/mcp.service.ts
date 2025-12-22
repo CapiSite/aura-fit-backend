@@ -16,31 +16,31 @@ export class McpService {
     this.registerTool({
       name: 'getUserProfile',
       description:
-        'Obtém o perfil completo de um usuário com base no ID do chat do Telegram.',
+        'Obtém o perfil completo de um usuário com base no número de telefone do WhatsApp.',
       parametersSchema: {
         type: 'object',
         properties: {
-          chatId: {
+          phoneNumber: {
             type: 'number',
-            description: 'O ID do chat do Telegram do usuário.',
+            description: 'O número de telefone do usuário (WhatsApp).',
           },
         },
-        required: ['chatId'],
+        required: ['phoneNumber'],
       },
-      handler: async (args: { chatId: number }) => {
-        const { chatId } = args;
-        if (!chatId) {
-          return { error: 'O parâmetro chatId é obrigatório.' };
+      handler: async (args: { phoneNumber: number }) => {
+        const { phoneNumber } = args;
+        if (!phoneNumber) {
+          return { error: 'O parâmetro phoneNumber é obrigatório.' };
         }
 
-        const prismaChatId = String(chatId);
+        const phoneNumberStr = String(phoneNumber);
 
         const profile = await this.prisma.userProfile.findUnique({
-          where: { chatId: prismaChatId },
+          where: { phoneNumber: phoneNumberStr },
         });
 
         if (!profile) {
-          return { error: `Perfil não encontrado para o chatId: ${chatId}` };
+          return { error: `Perfil não encontrado para o phoneNumber: ${phoneNumber}` };
         }
 
         // Converte BigInt para string para garantir a serialização em JSON
@@ -59,9 +59,9 @@ export class McpService {
       parametersSchema: {
         type: 'object',
         properties: {
-          chatId: {
+          phoneNumber: {
             type: 'number',
-            description: 'O ID do chat do Telegram do usuário.',
+            description: 'O número de telefone do usuário (WhatsApp).',
           },
           name: { type: 'string', description: 'Nome do usuário' },
           weight: { type: 'number', description: 'Peso em kg' },
@@ -119,17 +119,17 @@ export class McpService {
             description: 'Estilo do plano alimentar',
           },
         },
-        required: ['chatId'],
+        required: ['phoneNumber'],
       },
       handler: async (args: any) => {
-        const { chatId, ...data } = args;
-        if (!chatId) return { error: 'chatId é obrigatório' };
+        const { phoneNumber, ...data } = args;
+        if (!phoneNumber) return { error: 'phoneNumber é obrigatório' };
 
-        const prismaChatId = String(chatId);
+        const phoneNumberStr = String(phoneNumber);
 
         try {
           const updated = await this.prisma.userProfile.update({
-            where: { chatId: prismaChatId },
+            where: { phoneNumber: phoneNumberStr },
             data: data,
           });
 

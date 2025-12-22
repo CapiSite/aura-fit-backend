@@ -234,10 +234,10 @@ export class AsaasService {
     if (paymentId) {
       const record = await this.prisma.payment.findUnique({
         where: { asaasPaymentId: paymentId },
-        select: { chatId: true, plan: true },
+        select: { userId: true, plan: true, user: { select: { phoneNumber: true } } },
       });
-      if (record?.chatId && record?.plan) {
-        return { chatId: String(record.chatId), planCode: record.plan };
+      if (record?.user?.phoneNumber && record?.plan) {
+        return { chatId: String(record.user.phoneNumber), planCode: record.plan };
       }
     }
     return this.extractPaymentContext(payment);
@@ -309,6 +309,17 @@ export class AsaasService {
       dueDate,
     };
 
+    // Busca o user para obter o userId
+    const user = await this.prisma.userProfile.findUnique({
+      where: { phoneNumber: String(chatId) },
+      select: { id: true },
+    });
+
+    if (!user) {
+      this.logger.warn(`User not found for chatId ${chatId}, ignorando persistencia`);
+      return;
+    }
+
     await this.prisma.payment.upsert({
       where: { asaasPaymentId: payment.id },
       update: {
@@ -316,6 +327,7 @@ export class AsaasService {
         ...(paidAt ? { paidAt } : {}),
       },
       create: {
+        userId: user.id,
         ...data,
         paidAt: paidAt ?? null,
       },
@@ -331,7 +343,7 @@ export class AsaasService {
 
     const paidAt = this.resolvePaidAt(payment);
     const profile = await this.prisma.userProfile.findUnique({
-      where: { chatId: String(chatId) },
+      where: { phoneNumber: String(chatId) },
       select: { lastPaymentAt: true, subscriptionPlan: true, isPaymentActive: true },
     });
 
@@ -369,7 +381,7 @@ export class AsaasService {
     expiresAt.setDate(expiresAt.getDate() + 30);
 
     await this.prisma.userProfile.update({
-      where: { chatId: String(chatId) },
+      where: { phoneNumber: String(chatId) },
       data: {
         subscriptionPlan: planCode,
         isPaymentActive: true,

@@ -11,7 +11,7 @@ type AuthRequest = Request & { user?: { cpf?: string; role?: string } };
 
 @Controller('asaas')
 export class AsaasController {
-  constructor(private readonly asaasService: AsaasService, private readonly usersService: UsersService) {}
+  constructor(private readonly asaasService: AsaasService, private readonly usersService: UsersService) { }
 
   @Post('customers')
   @UseGuards(AuthGuard)
@@ -43,26 +43,26 @@ export class AsaasController {
     return this.asaasService.createPlanPayment(dto.plan as PlanCode, customer.id, {
       dueDate: dto.dueDate,
       paymentMethod,
-      chatId: user.chatId,
+      chatId: user.phoneNumber,
       creditCard:
         paymentMethod === AsaasBillingType.PIX
           ? undefined
           : {
-              holderName: user.name,
-              number: digits(dto.creditCardNumber),
-              expiryMonth: month,
-              expiryYear: year,
-              ccv: digits(dto.creditCardCcv),
-            },
+            holderName: user.name,
+            number: digits(dto.creditCardNumber),
+            expiryMonth: month,
+            expiryYear: year,
+            ccv: digits(dto.creditCardCcv),
+          },
       holderInfo:
         paymentMethod === AsaasBillingType.PIX
           ? undefined
           : {
-              name: user.name,
-              email: user.email ?? undefined,
-              cpfCnpj: user.cpf ?? '',
-              postalCode: digits(dto.postalCode),
-            },
+            name: user.name,
+            email: user.email ?? undefined,
+            cpfCnpj: user.cpf ?? '',
+            postalCode: digits(dto.postalCode),
+          },
     });
   }
 
@@ -80,7 +80,7 @@ export class AsaasController {
       throw new HttpException('CPF nao informado', HttpStatus.BAD_REQUEST);
     }
     const user = await this.usersService.getMeByCpf(cpf);
-    return this.asaasService.checkPaymentStatus(id, user.chatId);
+    return this.asaasService.checkPaymentStatus(id, user.phoneNumber);
   }
 
   @Post('webhook')

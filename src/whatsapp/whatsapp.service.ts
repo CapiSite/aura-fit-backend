@@ -99,11 +99,12 @@ export class WhatsappService implements OnModuleInit {
       );
 
       for (const user of activeUsers) {
-        if (!user.chatId) continue;
+        const userPhone = user.phoneNumber;
+        if (!userPhone) continue;
 
         try {
           // Normaliza o telefone para garantir formato correto
-          const phone = this.normalizePhone(user.chatId);
+          const phone = this.normalizePhone(userPhone);
 
           // Mensagem de status inicial desativada a pedido do usuario.
           // await this.sendText({
@@ -117,7 +118,7 @@ export class WhatsappService implements OnModuleInit {
           await new Promise((resolve) => setTimeout(resolve, 1000));
         } catch (err) {
           this.logger.error(
-            `Failed to send active status message to ${user.chatId}`,
+            `Failed to send active status message to ${userPhone}`,
             err,
           );
         }
@@ -229,30 +230,30 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async isAuthorizedPhone(phone: string): Promise<boolean> {
-    const chatId = this.tryParseChatId(phone);
-    if (!chatId) {
+    const phoneNumber = this.tryParseChatId(phone);
+    if (!phoneNumber) {
       return false;
     }
 
     const profile = await this.prisma.userProfile.findUnique({
-      where: { chatId },
-      select: { chatId: true },
+      where: { phoneNumber },
+      select: { phoneNumber: true },
     });
 
     return Boolean(profile);
   }
 
-  private async ensureUserProfile(chatId: string, name?: string) {
+  private async ensureUserProfile(phoneNumber: string, name?: string) {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     return this.prisma.userProfile.upsert({
-      where: { chatId },
+      where: { phoneNumber },
       update: {
         subscriptionPlan: 'FREE',
         subscriptionExpiresAt: expiresAt,
         ...(name ? { name } : {}),
       },
       create: {
-        chatId,
+        phoneNumber,
         cpf: null,
         email: null,
         name: name || 'Usuário WhatsApp',
@@ -324,14 +325,14 @@ export class WhatsappService implements OnModuleInit {
         this.registerMessageKey(messageKey);
       }
 
-      const chatId = this.tryParseChatId(phone);
-      if (!chatId) {
-        console.log(`Unable to parse chatId from phone: ${phone}`);
+      const phoneNumber = this.tryParseChatId(phone);
+      if (!phoneNumber) {
+        console.log(`Unable to parse phoneNumber from phone: ${phone}`);
         return { received: true };
       }
 
       let user = await this.prisma.userProfile.findUnique({
-        where: { chatId },
+        where: { phoneNumber },
       });
 
       const senderName =
@@ -342,7 +343,7 @@ export class WhatsappService implements OnModuleInit {
       // Update name if we have a senderName and the current name is the default
       if (user && senderName && user.name === 'Usuário WhatsApp') {
         await this.prisma.userProfile.update({
-          where: { chatId },
+          where: { phoneNumber },
           data: { name: senderName },
         });
       }
@@ -351,7 +352,7 @@ export class WhatsappService implements OnModuleInit {
         console.log(
           `Creating profile for unregistered phone: ${phone}, name: ${senderName}`,
         );
-        user = await this.ensureUserProfile(chatId, senderName);
+        user = await this.ensureUserProfile(phoneNumber, senderName);
       }
 
       // Check for plan expiration

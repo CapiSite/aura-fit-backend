@@ -34,7 +34,6 @@
     "class-validator": "^0.14.2",
     "nestjs-telegraf": "^2.9.1",
     "node": "^20.19.6",
-    "node-telegram-bot-api": "^0.66.0",
     "openai": "^6.9.0",
     "pg": "^8.16.3",
     "prisma": "^7.0.1",
