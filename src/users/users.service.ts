@@ -17,7 +17,7 @@ export class UsersService {
   }
 
   async create(createUserDto: CreateUserDto) {
-    const chatId = String(createUserDto.chatId);
+    const phoneNumber = String(createUserDto.phoneNumber);
     const plan = (createUserDto.subscriptionPlan ?? SubscriptionPlan.FREE) as SubscriptionPlan;
     const trialDays = 3;
     const trialExpiresAt =
@@ -25,21 +25,27 @@ export class UsersService {
         ? new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
         : null;
 
+    // Verifica se usuário já existe
     const existing = await this.prisma.userProfile.findFirst({
       where: {
-        OR: [{ cpf: createUserDto.cpf }, { phoneNumber: chatId }],
+        OR: [
+          { cpf: createUserDto.cpf },
+          { phoneNumber },
+          { email: createUserDto.email }
+        ].filter(condition => Object.values(condition)[0]) // Remove null/undefined
       },
     });
+
     if (existing) {
-      throw new ConflictException('CPF ou chatId ja cadastrado');
+      throw new ConflictException('CPF, email ou telefone ja cadastrado');
     }
 
+    // Se NÃO existe, cria novo
     const data = {
-      chatId,
       name: createUserDto.name,
       cpf: createUserDto.cpf ?? null,
-      email: createUserDto.email ?? `${createUserDto.chatId}@aura.local`,
-      phoneNumber: createUserDto.phoneNumber ?? chatId,
+      email: createUserDto.email ?? `${phoneNumber}@aura.local`,
+      phoneNumber,
       subscriptionPlan: plan,
       ...(createUserDto.role ? { role: createUserDto.role } : {}),
       subscriptionExpiresAt: trialExpiresAt,
@@ -51,7 +57,7 @@ export class UsersService {
       return await this.prisma.userProfile.create({ data });
     } catch (error: any) {
       if (error?.code === 'P2002') {
-        throw new ConflictException('CPF ou chatId ja cadastrado');
+        throw new ConflictException('CPF ou telefone ja cadastrado');
       }
       throw new BadRequestException('Erro ao criar usuario');
     }
@@ -65,9 +71,9 @@ export class UsersService {
     }
   }
 
-  async findOne(chatId: string) {
+  async findOne(id: number) {
     try {
-      const user = await this.prisma.userProfile.findUnique({ where: { phoneNumber: String(chatId) } });
+      const user = await this.prisma.userProfile.findUnique({ where: { id } });
       if (!user) throw new NotFoundException('Usuario nao encontrado');
       return user;
     } catch {
@@ -75,14 +81,13 @@ export class UsersService {
     }
   }
 
-  async update(chatId: string, updateUserDto: UpdateUserDto) {
+  async update(id: number, updateUserDto: UpdateUserDto) {
     const data: any = { ...updateUserDto };
-    if (updateUserDto.chatId) data.chatId = String(updateUserDto.chatId);
     try {
-      return await this.prisma.userProfile.update({ where: { phoneNumber: String(chatId) }, data });
+      return await this.prisma.userProfile.update({ where: { id }, data });
     } catch (error: any) {
       if (error?.code === 'P2002') {
-        throw new ConflictException('CPF ou chatId ja cadastrado');
+        throw new ConflictException('CPF ou telefone ja cadastrado');
       }
       if (error?.code === 'P2025') {
         throw new NotFoundException('Usuario nao encontrado');
@@ -91,9 +96,9 @@ export class UsersService {
     }
   }
 
-  async remove(chatId: string) {
+  async remove(id: number) {
     try {
-      return await this.prisma.userProfile.delete({ where: { phoneNumber: String(chatId) } });
+      return await this.prisma.userProfile.delete({ where: { id } });
     } catch (error: any) {
       if (error?.code === 'P2025') {
         throw new NotFoundException('Usuario nao encontrado');
@@ -106,7 +111,7 @@ export class UsersService {
     if (!cpf) throw new BadRequestException('CPF nao informado');
     const user = await this.ensureDailyResetByCpf(cpf);
     if (!user) throw new NotFoundException('Usuario nao encontrado');
-    const limits: Record<string, number> = { FREE: 5, PLUS: 25, PRO: 40 };
+    const limits: Record<string, number> = { FREE: 20, PLUS: 25, PRO: 40 };
     const plan =
       ((user.subscriptionPlan as unknown as string) ?? 'FREE')
         .toString()

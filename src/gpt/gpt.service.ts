@@ -55,7 +55,7 @@ export class GptService {
     if (!profile) {
       return 'Perfil não encontrado.';
     }
-    const limits: Record<string, number> = { FREE: 20, PLUS: 20, PRO: 40 };
+    const limits: Record<string, number> = { FREE: 20, PLUS: 25, PRO: 40 };
     const last = profile.requestsLastReset ?? now;
     const resetNeeded =
       last.getUTCFullYear() !== now.getUTCFullYear() ||

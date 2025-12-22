@@ -3,7 +3,7 @@ import { SubscriptionPlan, Role } from '@prisma/client';
 
 export class CreateUserDto {
   @IsString()
-  chatId: string;
+  phoneNumber: string;
 
   @IsString()
   name: string;
@@ -18,10 +18,6 @@ export class CreateUserDto {
   @IsString()
   @IsIn(['FREE', 'PLUS', 'PRO'])
   subscriptionPlan: SubscriptionPlan;
-
-  @IsOptional()
-  @IsString()
-  phoneNumber?: string;
 
   @IsOptional()
   @IsString()

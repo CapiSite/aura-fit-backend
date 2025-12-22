@@ -296,7 +296,6 @@ export class AsaasService {
     const dueDate = this.parseDate(payment.dueDate);
     const data = {
       asaasPaymentId: payment.id,
-      chatId: String(chatId),
       amount: Number(payment.value ?? 0),
       plan,
       status,

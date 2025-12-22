@@ -66,20 +66,20 @@ export class UsersController {
     return this.usersService.getInvoicesByCpf(cpf);
   }
 
-  @Get(':chatId')
-  findOne(@Param('chatId') chatId: string) {
-    return this.usersService.findOne(chatId);
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.usersService.findOne(+id);
   }
 
   @UseGuards(AuthAdminGuard)
-  @Patch(':chatId')
-  update(@Param('chatId') chatId: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(chatId, updateUserDto);
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.usersService.update(+id, updateUserDto);
   }
 
   @UseGuards(AuthAdminGuard)
-  @Delete(':chatId')
-  remove(@Param('chatId') chatId: string) {
-    return this.usersService.remove(chatId);
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.usersService.remove(+id);
   }
 }
