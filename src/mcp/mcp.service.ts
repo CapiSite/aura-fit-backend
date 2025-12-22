@@ -118,6 +118,18 @@ export class McpService {
             type: 'string',
             description: 'Estilo do plano alimentar',
           },
+          waterReminderEnabled: {
+            type: 'boolean',
+            description: 'Se os lembretes de água estão ativados',
+          },
+          waterReminderIntervalMinutes: {
+            type: 'number',
+            description: 'Intervalo em MINUTOS entre lembretes de água (ex: 60=1h, 120=2h, 180=3h)',
+          },
+          timezone: {
+            type: 'string',
+            description: 'Fuso horário do usuário (ex: America/Sao_Paulo, America/New_York)',
+          },
         },
         required: ['phoneNumber'],
       },

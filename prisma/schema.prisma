@@ -48,7 +48,7 @@ model UserProfile {
   email                        String?
   role                         Role             @default(USER)
   waterReminderEnabled         Boolean          @default(true)
-  waterReminderIntervalMinutes Int              @default(180)
+  waterReminderIntervalMinutes Int?
   waterReminderLastSent        DateTime?
   meals                        Meal[]
   payments                     Payment[]

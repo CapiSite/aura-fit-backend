@@ -12,6 +12,7 @@ import { CreateWhatsappDto } from './dto/create-whatsapp.dto';
 import { WebhookEventDto } from './dto/webhook-event.dto';
 import { GptService } from '../gpt/gpt.service';
 import { PrismaService } from '../prisma_connection/prisma.service';
+import { ReminderService } from 'src/common/triggers/reminder.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -32,16 +33,28 @@ export class WhatsappService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly gptService: GptService,
     private readonly prisma: PrismaService,
+    private readonly reminderService: ReminderService,
   ) {
     this.instanceId =
       this.configService.get<string>('whatsapp.instanceId') ?? '';
     this.token = this.configService.get<string>('whatsapp.token') ?? '';
     this.clientToken =
       this.configService.get<string>('whatsapp.clientToken') ?? '';
+
   }
 
   async onModuleInit() {
     this.logger.log('WhatsappModule initialized.');
+
+    // Registra WhatsApp como transport para lembretes
+    this.reminderService.registerTransport({
+      name: 'WhatsApp',
+      send: async (phoneNumber, message) => {
+        const phone = this.normalizePhone(phoneNumber);
+        if (!phone) return;
+        await this.sendText({ phone, message });
+      },
+    });
 
     if (this.shouldSkipStartupMessage()) {
       this.logger.warn(
