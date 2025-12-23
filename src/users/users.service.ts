@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -10,6 +10,8 @@ import { hashPassword, verifyPassword } from '../common/security/bcrypt';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) { }
 
   private get passwordPepper(): string {
@@ -169,6 +171,8 @@ export class UsersService {
         isPaymentActive: true,
         lastPaymentAt: true,
         subscriptionExpiresAt: true,
+        waterReminderEnabled: true,
+        waterReminderIntervalMinutes: true,
       },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');
@@ -301,6 +305,14 @@ export class UsersService {
     if (dto.name) data.name = dto.name.trim();
     if (dto.email) data.email = dto.email.trim();
 
+    // Water reminder settings
+    if (dto.waterReminderEnabled !== undefined) {
+      data.waterReminderEnabled = dto.waterReminderEnabled;
+    }
+    if (dto.waterReminderIntervalMinutes !== undefined) {
+      data.waterReminderIntervalMinutes = dto.waterReminderIntervalMinutes;
+    }
+
     if (data.email) {
       const exists = await this.prisma.userProfile.findFirst({
         where: { email: data.email, NOT: { cpf } },
@@ -311,7 +323,15 @@ export class UsersService {
     return this.prisma.userProfile.update({
       where: { cpf },
       data,
-      select: { phoneNumber: true, name: true, email: true, cpf: true, subscriptionPlan: true },
+      select: {
+        phoneNumber: true,
+        name: true,
+        email: true,
+        cpf: true,
+        subscriptionPlan: true,
+        waterReminderEnabled: true,
+        waterReminderIntervalMinutes: true,
+      },
     });
   }
 
@@ -331,6 +351,89 @@ export class UsersService {
     });
 
     return { ok: true };
+  }
+
+  async deactivateMeByCpf(cpf: string) {
+    if (!cpf) throw new BadRequestException('CPF nao informado');
+
+    const user = await this.prisma.userProfile.findUnique({
+      where: { cpf },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario nao encontrado');
+
+    // Log de auditoria - Desativação de conta
+    this.logger.warn(`[AUDIT] Desativando conta: CPF=${cpf}, ID=${user.id}, Nome=${user.name}`);
+
+    try {
+      await this.prisma.userProfile.update({
+        where: { cpf },
+        data: { isActive: false },
+      });
+
+      // Log de auditoria - Conta desativada
+      this.logger.warn(`[AUDIT] Conta DESATIVADA: CPF=${cpf}, ID=${user.id}, Timestamp=${new Date().toISOString()}`);
+
+      return { ok: true, message: 'Conta desativada com sucesso. Você pode reativá-la fazendo login novamente.' };
+    } catch (error: any) {
+      this.logger.error(`[AUDIT] ERRO ao desativar conta: CPF=${cpf}, Error=${error?.message || 'Unknown'}`);
+      throw new BadRequestException('Erro ao desativar conta');
+    }
+  }
+
+  async deleteMeByCpf(cpf: string) {
+    if (!cpf) throw new BadRequestException('CPF nao informado');
+
+    const user = await this.prisma.userProfile.findUnique({
+      where: { cpf },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phoneNumber: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario nao encontrado');
+
+    // Log de auditoria - Tentativa de deleção
+    this.logger.warn(`[AUDIT] Tentativa de deletar conta: CPF=${cpf}, ID=${user.id}, Nome=${user.name}, Email=${user.email}`);
+
+    try {
+      // Deleta todos os registros relacionados ao usuário
+      await this.prisma.$transaction([
+        // Deleta os registros de uso de prompts
+        this.prisma.promptUsage.deleteMany({
+          where: { userId: user.id },
+        }),
+        // Deleta os pagamentos
+        this.prisma.payment.deleteMany({
+          where: { userId: user.id },
+        }),
+        // Por fim, deleta o usuário
+        this.prisma.userProfile.delete({
+          where: { cpf },
+        }),
+      ]);
+
+      // Log de auditoria - Deleção bem-sucedida
+      this.logger.warn(`[AUDIT] Conta DELETADA com sucesso: CPF=${cpf}, ID=${user.id}, Nome=${user.name}, Timestamp=${new Date().toISOString()}`);
+
+      return { ok: true, message: 'Conta deletada com sucesso' };
+    } catch (error: any) {
+      // Log de auditoria - Erro ao deletar
+      this.logger.error(`[AUDIT] ERRO ao deletar conta: CPF=${cpf}, ID=${user.id}, Error=${error?.message || 'Unknown'}`);
+
+      if (error?.code === 'P2025') {
+        throw new NotFoundException('Usuario nao encontrado');
+      }
+      throw new BadRequestException('Erro ao deletar conta');
+    }
   }
 
   private async resolveTrialStatus(user: {

@@ -1,9 +1,14 @@
-import { Controller, Post, Body, BadRequestException } from '@nestjs/common'
+import { Controller, Post, Body, BadRequestException, UsePipes, ValidationPipe } from '@nestjs/common'
 import { AuthService } from './auth.service'
+import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
+import { ConfirmPasswordResetDto } from './dto/confirm-password-reset.dto';
+import { RequestReactivationDto } from './dto/request-reactivation.dto';
+import { ConfirmReactivationDto } from './dto/confirm-reactivation.dto';
 
 @Controller('auth')
+@UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('register')
   async register(@Body() body: any) {
@@ -19,10 +24,23 @@ export class AuthController {
     return this.authService.login(email, password)
   }
 
+  @Post('request-reactivation')
+  async requestReactivation(@Body() dto: RequestReactivationDto) {
+    return this.authService.requestReactivation(dto.email)
+  }
+
+  @Post('confirm-reactivation')
+  async confirmReactivation(@Body() dto: ConfirmReactivationDto) {
+    return this.authService.confirmReactivation(dto.token)
+  }
+
   @Post('forgot-password')
-  async forgotPassword(@Body() body: { email: string }) {
-    const { email } = body ?? {}
-    if (!email) throw new BadRequestException('E-mail e obrigatorio')
-    return this.authService.forgotPassword(email)
+  async forgotPassword(@Body() dto: RequestPasswordResetDto) {
+    return this.authService.requestPasswordReset(dto.email)
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ConfirmPasswordResetDto) {
+    return this.authService.confirmPasswordReset(dto.token, dto.newPassword)
   }
 }

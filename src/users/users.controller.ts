@@ -10,7 +10,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 @UseGuards(AuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @UseGuards(AuthAdminGuard)
   @Post()
@@ -64,6 +64,18 @@ export class UsersController {
   meInvoices(@Req() req: any) {
     const cpf = req?.user?.cpf;
     return this.usersService.getInvoicesByCpf(cpf);
+  }
+
+  @Patch('me/deactivate')
+  deactivateMe(@Req() req: any) {
+    const cpf = req?.user?.cpf;
+    return this.usersService.deactivateMeByCpf(cpf);
+  }
+
+  @Delete('me')
+  deleteMe(@Req() req: any) {
+    const cpf = req?.user?.cpf;
+    return this.usersService.deleteMeByCpf(cpf);
   }
 
   @Get(':id')

@@ -8,9 +8,7 @@ datasource db {
 }
 
 model UserProfile {
-  id                           Int              @id @default(autoincrement())
   name                         String
-  phoneNumber                  String           @unique
   weight                       Float?
   height                       Float?
   activityLevel                String?
@@ -33,27 +31,32 @@ model UserProfile {
   lastCheckInAt                DateTime?
   lastWeighInAt                DateTime?
   notes                        String?
-  createdAt                    DateTime         @default(now())
-  updatedAt                    DateTime         @updatedAt
-  cpf                          String?          @unique
-  isPaymentActive              Boolean          @default(false)
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
+  cpf                          String?              @unique
+  isPaymentActive              Boolean              @default(false)
   lastPaymentAt                DateTime?
   nextBillingAt                DateTime?
   subscriptionExpiresAt        DateTime?
-  subscriptionPlan             SubscriptionPlan @default(FREE)
+  subscriptionPlan             SubscriptionPlan     @default(FREE)
   planStyle                    PlanStyle?
   requestsLastReset            DateTime?
-  requestsToday                Int              @default(0)
+  requestsToday                Int                  @default(0)
   passwordHash                 String?
   email                        String?
-  role                         Role             @default(USER)
-  waterReminderEnabled         Boolean          @default(true)
+  role                         Role                 @default(USER)
+  waterReminderEnabled         Boolean              @default(false)
   waterReminderIntervalMinutes Int?
   waterReminderLastSent        DateTime?
+  id                           Int                  @id @unique @default(autoincrement())
+  phoneNumber                  String               @unique
+  isActive                     Boolean              @default(true)
   meals                        Meal[]
   payments                     Payment[]
   promptUsages                 PromptUsage[]
   userMetricLogs               UserMetricLog[]
+  reactivationTokens           ReactivationToken[]
+  passwordResetTokens          PasswordResetToken[]
 
   @@map("user_profile")
   @@schema("aura")
@@ -61,10 +64,10 @@ model UserProfile {
 
 model Meal {
   id          Int         @id @default(autoincrement())
-  userId      Int
   content     String
   mealType    MealType
   timestamp   DateTime    @default(now())
+  userId      Int
   userProfile UserProfile @relation(fields: [userId], references: [id])
 
   @@map("meal")
@@ -73,12 +76,12 @@ model Meal {
 
 model UserMetricLog {
   id       Int         @id @default(autoincrement())
-  userId   Int
   loggedAt DateTime    @default(now())
   weight   Float?
   bodyFat  Float?
   waist    Float?
   hip      Float?
+  userId   Int
   user     UserProfile @relation(fields: [userId], references: [id])
 
   @@map("user_metric_log")
@@ -87,20 +90,20 @@ model UserMetricLog {
 
 model Payment {
   id                    Int              @id @default(autoincrement())
-  userId                Int
-  asaasPaymentId        String?          @unique
   amount                Float
   plan                  SubscriptionPlan
   status                String
   method                String?
-  invoiceUrl            String?
-  bankSlipUrl           String?
-  transactionReceiptUrl String?
-  pixQrCode             String?
-  pixPayload            String?
-  dueDate               DateTime?
-  createdAt             DateTime         @default(now())
   paidAt                DateTime?
+  asaasPaymentId        String?          @unique
+  bankSlipUrl           String?
+  createdAt             DateTime         @default(now())
+  dueDate               DateTime?
+  invoiceUrl            String?
+  pixPayload            String?
+  pixQrCode             String?
+  transactionReceiptUrl String?
+  userId                Int
   user                  UserProfile      @relation(fields: [userId], references: [id])
 
   @@map("payment")
@@ -109,15 +112,41 @@ model Payment {
 
 model PromptUsage {
   id        Int         @id @default(autoincrement())
-  userId    Int
   date      DateTime
   count     Int         @default(0)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+  userId    Int
   user      UserProfile @relation(fields: [userId], references: [id])
 
-  @@unique([userId, date], name: "userId_date")
+  @@unique([userId, date], name: "userId_date", map: "userId_date")
   @@map("prompt_usage")
+  @@schema("aura")
+}
+
+model ReactivationToken {
+  id        Int         @id @default(autoincrement())
+  token     String      @unique
+  userId    Int
+  user      UserProfile @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  used      Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@map("reactivation_token")
+  @@schema("aura")
+}
+
+model PasswordResetToken {
+  id        Int         @id @default(autoincrement())
+  token     String      @unique
+  userId    Int
+  user      UserProfile @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  used      Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  @@map("password_reset_token")
   @@schema("aura")
 }
 

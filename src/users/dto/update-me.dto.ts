@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength, IsBoolean, IsInt, Min } from 'class-validator';
 
 export class UpdateMeDto {
   @IsOptional()
@@ -10,4 +10,13 @@ export class UpdateMeDto {
   @IsEmail()
   @MaxLength(180)
   email?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  waterReminderEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  waterReminderIntervalMinutes?: number;
 }

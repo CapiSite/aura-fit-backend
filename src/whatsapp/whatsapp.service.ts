@@ -382,6 +382,17 @@ export class WhatsappService implements OnModuleInit {
         return { received: true };
       }
 
+      // Check if account is active
+      if (!user.isActive) {
+        console.log(`Account deactivated for user ${phone}`);
+        await this.sendText({
+          phone,
+          message:
+            'Sua conta está desativada. Para reativar, faça login novamente no sistema através do site.',
+        });
+        return { received: true, accountDeactivated: true };
+      }
+
       console.log(
         `Received message from ${phone}: ${textMessage || '[Image]'} ${imageUrl ? `(Image: ${imageUrl})` : ''}`,
       );
