@@ -100,16 +100,18 @@ export class MorningGreetingService {
 
   /**
    * Verifica se está em uma janela válida para verificar mensagens.
-   * Janela ampla de 5h-12h para cobrir diferentes wakeTime dos usuários.
+   * Janela ampla de 5h-14h para cobrir diferentes wakeTime dos usuários.
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 5 && hour < 12;
+    return hour >= 5 && hour < 13;
   }
 
   private async sendMorningGreetings() {
     const now = new Date();
     const currentDateKey = this.getCurrentDateKey(now);
+
+    this.logger.debug(`Checking morning greetings at ${now.toISOString()}`);
 
     // Reset do conjunto de envios se mudou o dia
     if (this.lastCheckDate !== currentDateKey) {
@@ -118,8 +120,9 @@ export class MorningGreetingService {
       this.logger.log(`New day detected: ${currentDateKey}. Resetting greeting tracker.`);
     }
 
-    // Verifica se está dentro da janela de verificação (5h-12h)
+    // Verifica se está dentro da janela de verificação (5h-14h)
     if (!this.isWithinCheckWindow(now)) {
+      this.logger.debug(`Outside check window (current hour: ${now.getHours()}). Skipping.`);
       return;
     }
 
@@ -129,12 +132,12 @@ export class MorningGreetingService {
     }
 
     try {
-      // Busca usuários ativos que ainda não receberam a mensagem hoje
+      // Busca usuários ativos - inclui FREE, PLUS e PRO
       const users = await this.prisma.userProfile.findMany({
         where: {
-          // Apenas usuários com assinatura ativa
+          isActive: true, // Usuário precisa estar ativo
           OR: [
-            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida
+            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida (FREE, PLUS, PRO)
             { isPaymentActive: true }, // Ou pagamento ativo
           ],
         },
@@ -143,8 +146,12 @@ export class MorningGreetingService {
           phoneNumber: true,
           name: true,
           wakeTime: true,
+          subscriptionPlan: true,
+          isActive: true,
         },
       });
+
+      this.logger.log(`Found ${users.length} active users for morning greetings check`);
 
       if (users.length === 0) {
         this.logger.debug('No active users found for morning greetings');
@@ -152,21 +159,40 @@ export class MorningGreetingService {
       }
 
       let sentCount = 0;
+      let skippedCount = 0;
+      let alreadySentCount = 0;
 
       for (const user of users) {
         const phoneNumber = user.phoneNumber;
-        if (!phoneNumber) continue;
+        if (!phoneNumber) {
+          this.logger.debug(`User ${user.id} (${user.name}) has no phone number. Skipping.`);
+          skippedCount++;
+          continue;
+        }
 
         // Pula se já enviou hoje para este usuário
         if (this.sentGreetingsToday.has(phoneNumber)) {
+          alreadySentCount++;
           continue;
         }
 
         // Calcula o horário agendado para este usuário hoje (baseado no wakeTime)
         const scheduledTime = this.getScheduledTimeForUser(user.id, currentDateKey, user.wakeTime);
 
+        this.logger.debug(
+          `User ${user.id} (${user.name}, ${phoneNumber}): ` +
+          `Plan=${user.subscriptionPlan}, WakeTime=${user.wakeTime || 'not set'}, ` +
+          `ScheduledTime=${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')}, ` +
+          `Now=${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`
+        );
+
         // Só envia se o horário agendado já passou
         if (now < scheduledTime) {
+          this.logger.debug(
+            `User ${user.id} (${user.name}): Scheduled time not reached yet. ` +
+            `Scheduled: ${scheduledTime.toISOString()}, Now: ${now.toISOString()}`
+          );
+          skippedCount++;
           continue; // Ainda não chegou a hora deste usuário
         }
 
@@ -196,9 +222,10 @@ export class MorningGreetingService {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      if (sentCount > 0) {
-        this.logger.log(`Morning greetings sent to ${sentCount} users`);
-      }
+      this.logger.log(
+        `Morning greetings cycle complete: ` +
+        `Sent=${sentCount}, AlreadySent=${alreadySentCount}, Skipped=${skippedCount}, Total=${users.length}`
+      );
     } catch (error) {
       this.logger.error('Failed to send morning greetings', error as Error);
     }
