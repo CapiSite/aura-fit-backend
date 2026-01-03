@@ -269,7 +269,8 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async ensureUserProfile(phoneNumber: string, name?: string) {
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    // FREE plan tem 3 dias de teste
+    const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     return this.prisma.userProfile.upsert({
       where: { phoneNumber },
       update: {

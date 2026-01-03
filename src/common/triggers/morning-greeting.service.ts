@@ -100,7 +100,7 @@ export class MorningGreetingService {
 
   /**
    * Verifica se está em uma janela válida para verificar mensagens.
-   * Janela ampla de 5h-14h para cobrir diferentes wakeTime dos usuários.
+   * Janela ampla de 5h-13h para cobrir diferentes wakeTime dos usuários.
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
@@ -132,12 +132,13 @@ export class MorningGreetingService {
     }
 
     try {
-      // Busca usuários ativos - inclui FREE, PLUS e PRO
+      // Busca usuários ativos - inclui FREE (3 dias de teste), PLUS e PRO
+      // FREE só funciona enquanto subscriptionExpiresAt > now (3 dias após registro)
       const users = await this.prisma.userProfile.findMany({
         where: {
           isActive: true, // Usuário precisa estar ativo
           OR: [
-            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida (FREE, PLUS, PRO)
+            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida (FREE tem 3 dias, PLUS/PRO conforme contratado)
             { isPaymentActive: true }, // Ou pagamento ativo
           ],
         },
