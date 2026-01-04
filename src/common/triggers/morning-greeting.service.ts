@@ -136,7 +136,6 @@ export class MorningGreetingService {
       // FREE só funciona enquanto subscriptionExpiresAt > now (3 dias após registro)
       const users = await this.prisma.userProfile.findMany({
         where: {
-          isActive: true, // Usuário precisa estar ativo
           OR: [
             { subscriptionExpiresAt: { gt: now } }, // Assinatura válida (FREE tem 3 dias, PLUS/PRO conforme contratado)
             { isPaymentActive: true }, // Ou pagamento ativo
@@ -167,6 +166,13 @@ export class MorningGreetingService {
         const phoneNumber = user.phoneNumber;
         if (!phoneNumber) {
           this.logger.debug(`User ${user.id} (${user.name}) has no phone number. Skipping.`);
+          skippedCount++;
+          continue;
+        }
+
+        // Pula usuários inativos
+        if (!user.isActive) {
+          this.logger.debug(`User ${user.id} (${user.name}) is inactive. Skipping.`);
           skippedCount++;
           continue;
         }
