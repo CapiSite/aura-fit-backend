@@ -9,7 +9,7 @@ export class MorningGreetingService {
   private readonly checkIntervalMs = 10 * 60 * 1000; // verifica a cada 10 minutos
 
   private readonly morningMessages = [
-    '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como posso te ajudar hoje?',
+    '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
     '🌅 Bom dia! Hora de acordar e arrasar! O que você planeja conquistar hoje?',
     '💪 Bom dia! Um novo dia cheio de oportunidades! Como posso te apoiar hoje?',
     '✨ Bom dia! Levanta que o sucesso te espera! Vamos começar bem? Como posso ajudar?',
@@ -81,8 +81,8 @@ export class MorningGreetingService {
       }
     }
 
-    // Gera um offset aleatório entre 0 e 60 minutos (wakeTime + 1 hora)
-    const randomMinuteOffset = Math.abs(hash) % 60;
+    // Gera um offset aleatório entre 0 e 30 minutos (wakeTime + 30 minutos)
+    const randomMinuteOffset = Math.abs(hash) % 30;
 
     // Calcula o horário final
     const totalMinutes = (baseHour * 60) + baseMinute + randomMinuteOffset;
@@ -100,11 +100,11 @@ export class MorningGreetingService {
 
   /**
    * Verifica se está em uma janela válida para verificar mensagens.
-   * Janela ampla de 5h-13h para cobrir diferentes wakeTime dos usuários.
+   * ATENÇÃO: Janela configurada para TESTE (13h-17h). Em produção usar 5h-13h.
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 13 && hour < 17;
+    return hour >= 5 && hour < 13;
   }
 
   private async sendMorningGreetings() {
@@ -151,90 +151,90 @@ export class MorningGreetingService {
         },
       });
 
-      this.logger.log(`Found ${users.length} active users for morning greetings check`);
+      this.logger.log(`Found ${users.length} users for morning greetings check`);
 
       if (users.length === 0) {
         this.logger.debug('No active users found for morning greetings');
         return;
       }
 
-      let sentCount = 0;
-      let skippedCount = 0;
-      let alreadySentCount = 0;
+      const eligibleUsers = users.filter(user => {
+        if (!user.phoneNumber || !user.isActive) return false;
+        if (this.sentGreetingsToday.has(user.phoneNumber)) return false;
 
-      for (const user of users) {
-        const phoneNumber = user.phoneNumber;
-        if (!phoneNumber) {
-          this.logger.debug(`User ${user.id} (${user.name}) has no phone number. Skipping.`);
-          skippedCount++;
-          continue;
-        }
-
-        // Pula usuários inativos
-        if (!user.isActive) {
-          this.logger.debug(`User ${user.id} (${user.name}) is inactive. Skipping.`);
-          skippedCount++;
-          continue;
-        }
-
-        // Pula se já enviou hoje para este usuário
-        if (this.sentGreetingsToday.has(phoneNumber)) {
-          alreadySentCount++;
-          continue;
-        }
-
-        // Calcula o horário agendado para este usuário hoje (baseado no wakeTime)
         const scheduledTime = this.getScheduledTimeForUser(user.id, currentDateKey, user.wakeTime);
+        return now >= scheduledTime;
+      });
 
-        this.logger.debug(
-          `User ${user.id} (${user.name}, ${phoneNumber}): ` +
-          `Plan=${user.subscriptionPlan}, WakeTime=${user.wakeTime || 'not set'}, ` +
-          `ScheduledTime=${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')}, ` +
-          `Now=${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`
-        );
+      if (eligibleUsers.length === 0) {
+        this.logger.log('No users ready to receive morning greetings at this time');
+        return;
+      }
 
-        // Só envia se o horário agendado já passou
-        if (now < scheduledTime) {
-          this.logger.debug(
-            `User ${user.id} (${user.name}): Scheduled time not reached yet. ` +
-            `Scheduled: ${scheduledTime.toISOString()}, Now: ${now.toISOString()}`
-          );
-          skippedCount++;
-          continue; // Ainda não chegou a hora deste usuário
-        }
+      this.logger.log(`${eligibleUsers.length} users are eligible for greetings now`);
 
-        const message = this.pickMessage();
+      const BATCH_SIZE = 50;
+      const CONCURRENT_SENDS = 5; // Máximo de envios simultâneos
+      let sentCount = 0;
+      let failedCount = 0;
 
-        // Envia através de todos os transportes registrados
-        for (const transport of this.transports) {
-          try {
-            await transport.send(phoneNumber, message);
-            this.logger.log(
-              `Morning greeting sent via ${transport.name} to ${phoneNumber} ` +
-              `(scheduled for ${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')})`
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Failed to send morning greeting via ${transport.name} to ${phoneNumber}`,
-              error as Error,
-            );
+      for (let i = 0; i < eligibleUsers.length; i += BATCH_SIZE) {
+        const batch = eligibleUsers.slice(i, i + BATCH_SIZE);
+        this.logger.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(eligibleUsers.length / BATCH_SIZE)}`);
+
+        const sendPromises: Promise<void>[] = [];
+
+        for (const user of batch) {
+          const phoneNumber = user.phoneNumber!;
+          const message = this.pickMessage();
+          const scheduledTime = this.getScheduledTimeForUser(user.id, currentDateKey, user.wakeTime);
+
+          const sendTask = this.sendToUser(phoneNumber, message, scheduledTime)
+            .then(() => {
+              this.sentGreetingsToday.add(phoneNumber);
+              sentCount++;
+            })
+            .catch(error => {
+              this.logger.warn(`Failed to send greeting to ${phoneNumber}`, error);
+              failedCount++;
+            });
+
+          sendPromises.push(sendTask);
+
+          if (sendPromises.length >= CONCURRENT_SENDS) {
+            await Promise.all(sendPromises);
+            sendPromises.length = 0; // Limpa para próximo conjunto
           }
         }
 
-        // Marca como enviado hoje
-        this.sentGreetingsToday.add(phoneNumber);
-        sentCount++;
+        // Aguarda todas as promises restantes do lote
+        await Promise.allSettled(sendPromises);
 
-        // Pequeno delay entre envios para evitar sobrecarga
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (i + BATCH_SIZE < eligibleUsers.length) {
+          const nextBatchSize = Math.min(BATCH_SIZE, eligibleUsers.length - i - BATCH_SIZE);
+          const delay = Math.min(nextBatchSize * 50, 2000); // 50ms por usuário, máx 2s
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
 
       this.logger.log(
-        `Morning greetings cycle complete: ` +
-        `Sent=${sentCount}, AlreadySent=${alreadySentCount}, Skipped=${skippedCount}, Total=${users.length}`
+        `Morning greetings complete: Sent=${sentCount}, Failed=${failedCount}, Total=${eligibleUsers.length}`
       );
     } catch (error) {
       this.logger.error('Failed to send morning greetings', error as Error);
+    }
+  }
+  private async sendToUser(
+    phoneNumber: string,
+    message: string,
+    scheduledTime: Date
+  ): Promise<void> {
+    for (const transport of this.transports) {
+      await transport.send(phoneNumber, message);
+      this.logger.log(
+        `Greeting sent via ${transport.name} to ${phoneNumber} ` +
+        `(scheduled ${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')})`
+      );
     }
   }
 
