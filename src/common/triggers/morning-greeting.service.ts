@@ -104,7 +104,7 @@ export class MorningGreetingService {
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 5 && hour < 13;
+    return hour >= 13 && hour < 17;
   }
 
   private async sendMorningGreetings() {
