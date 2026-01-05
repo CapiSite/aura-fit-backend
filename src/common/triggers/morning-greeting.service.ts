@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma_connection/prisma.service';
 export class MorningGreetingService {
   private readonly logger = new Logger(MorningGreetingService.name);
   private readonly transports: ReminderTransport[] = [];
-  private readonly checkIntervalMs = 2 * 60 * 1000; // verifica a cada 10 minutos
+  private readonly checkIntervalMs = 5 * 60 * 1000; // verifica a cada 10 minutos
 
   private readonly morningMessages = [
     '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
@@ -74,7 +74,7 @@ export class MorningGreetingService {
     }
 
     // A janela é de 30 minutos a partir do wakeTime
-    const WINDOW_DURATION_MINUTES = 10;
+    const WINDOW_DURATION_MINUTES = 30;
 
     // Início da janela: exatamente no wakeTime
     const [year, month, day] = dateKey.split('-').map(Number);
@@ -97,7 +97,7 @@ export class MorningGreetingService {
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 5 && hour < 18;
+    return hour >= 5 && hour < 11;
   }
 
   private async sendMorningGreetings() {
