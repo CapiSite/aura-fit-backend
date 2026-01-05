@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma_connection/prisma.service';
 export class MorningGreetingService {
   private readonly logger = new Logger(MorningGreetingService.name);
   private readonly transports: ReminderTransport[] = [];
-  private readonly checkIntervalMs = 5 * 60 * 1000; // verifica a cada 10 minutos
+  private readonly checkIntervalMs = 5 * 60 * 1000; // verifica a cada 5 minutos
 
   private readonly morningMessages = [
     '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
