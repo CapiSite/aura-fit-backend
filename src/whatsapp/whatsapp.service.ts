@@ -25,6 +25,7 @@ export class WhatsappService implements OnModuleInit {
   private readonly clientToken: string;
   private readonly webhookMessages = new Map<string, any[]>();
   private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
+
   private readonly lockFilePath = path.join(
     os.tmpdir(),
     'aura_whatsapp_startup.lock',
@@ -191,6 +192,7 @@ export class WhatsappService implements OnModuleInit {
 
     return [];
   }
+
 
   private ensureConfigured() {
     if (!this.instanceId || !this.token || !this.clientToken) {
@@ -390,7 +392,7 @@ export class WhatsappService implements OnModuleInit {
         await this.sendText({
           phone,
           message:
-            'Seu plano venceu. Por favor, renove sua assinatura para continuar utilizando o serviço.',
+            'Seu plano venceu. Por favor, renove sua assinatura para continuar utilizando o serviço. Link: https://aurafit.ia.br',
         });
         return { received: true };
       }
@@ -401,7 +403,7 @@ export class WhatsappService implements OnModuleInit {
         await this.sendText({
           phone,
           message:
-            'Sua conta está desativada. Para reativar, faça login novamente no sistema através do site.',
+            'Sua conta está desativada. Para reativar, faça login novamente no sistema através do site. Link: https://aurafit.ia.br',
         });
         return { received: true, accountDeactivated: true };
       }

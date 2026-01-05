@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma_connection/prisma.service';
 export class MorningGreetingService {
   private readonly logger = new Logger(MorningGreetingService.name);
   private readonly transports: ReminderTransport[] = [];
-  private readonly checkIntervalMs = 10 * 60 * 1000; // verifica a cada 10 minutos
+  private readonly checkIntervalMs = 2 * 60 * 1000; // verifica a cada 10 minutos
 
   private readonly morningMessages = [
     '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
@@ -47,26 +47,18 @@ export class MorningGreetingService {
   }
 
   /**
-   * Calcula o horário aleatório personalizado baseado no wakeTime do usuário.
-   * Se o usuário acorda às 6h, recebe entre 6h-7h (wakeTime + 0 a 60 minutos aleatórios).
-   * Se não tiver wakeTime, usa janela padrão de 6h-8h.
-   * O horário muda a cada dia para o mesmo usuário.
+   * Calcula a janela de envio baseada no wakeTime do usuário.
+   * Se o usuário acorda às 7h, a janela é 7:00-7:30 (30 minutos).
+   * Se não tiver wakeTime, usa janela padrão de 6:00-6:30.
+   * A mensagem SOMENTE será enviada se a hora atual estiver DENTRO desta janela.
    */
-  private getScheduledTimeForUser(
+  private getScheduledWindowForUser(
     userId: number,
     dateKey: string,
     wakeTime: string | null
-  ): Date {
-    // Cria um "hash" combinando userId e data para gerar horário único por usuário/dia
-    const seed = `${userId}-${dateKey}`;
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) {
-      hash = ((hash << 5) - hash) + seed.charCodeAt(i);
-      hash = hash & hash; // Convert to 32bit integer
-    }
-
+  ): { windowStart: Date; windowEnd: Date } {
     // Parse do wakeTime (formato esperado: "HH:mm" ou "HH:MM")
-    let baseHour = 7; // Padrão se não tiver wakeTime
+    let baseHour = 6; // Padrão se não tiver wakeTime
     let baseMinute = 0;
 
     if (wakeTime) {
@@ -81,30 +73,31 @@ export class MorningGreetingService {
       }
     }
 
-    // Gera um offset aleatório entre 0 e 30 minutos (wakeTime + 30 minutos)
-    const randomMinuteOffset = Math.abs(hash) % 30;
+    // A janela é de 30 minutos a partir do wakeTime
+    const WINDOW_DURATION_MINUTES = 10;
 
-    // Calcula o horário final
-    const totalMinutes = (baseHour * 60) + baseMinute + randomMinuteOffset;
-    const finalHour = Math.floor(totalMinutes / 60);
-    const finalMinute = totalMinutes % 60;
-
-    // Cria a data agendada
-    const scheduledTime = new Date();
+    // Início da janela: exatamente no wakeTime
     const [year, month, day] = dateKey.split('-').map(Number);
-    scheduledTime.setFullYear(year, month - 1, day);
-    scheduledTime.setHours(finalHour, finalMinute, 0, 0);
+    const windowStart = new Date();
+    windowStart.setFullYear(year, month - 1, day);
+    windowStart.setHours(baseHour, baseMinute, 0, 0);
 
-    return scheduledTime;
+    // Fim da janela: wakeTime + 30 minutos
+    const windowEnd = new Date(windowStart);
+    windowEnd.setMinutes(windowEnd.getMinutes() + WINDOW_DURATION_MINUTES);
+
+    return { windowStart, windowEnd };
   }
 
   /**
-   * Verifica se está em uma janela válida para verificar mensagens.
-   * ATENÇÃO: Janela configurada para TESTE (13h-17h). Em produção usar 5h-13h.
+   * Verifica se está em uma janela AMPLA válida para verificação.
+   * Janela 5h-13h é apenas para VERIFICAR (não enviar ainda).
+   * O envio real só acontece se estiver dentro da janela do wakeTime do usuário (30 min).
+   * Exemplo: Se usuário acorda às 7h, só recebe entre 7:00-7:30, mesmo que estejamos às 10h.
    */
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 5 && hour < 13;
+    return hour >= 5 && hour < 18;
   }
 
   private async sendMorningGreetings() {
@@ -162,8 +155,11 @@ export class MorningGreetingService {
         if (!user.phoneNumber || !user.isActive) return false;
         if (this.sentGreetingsToday.has(user.phoneNumber)) return false;
 
-        const scheduledTime = this.getScheduledTimeForUser(user.id, currentDateKey, user.wakeTime);
-        return now >= scheduledTime;
+        // Calcula a janela de horário válida para este usuário
+        const { windowStart, windowEnd } = this.getScheduledWindowForUser(user.id, currentDateKey, user.wakeTime);
+
+        // Só envia se a hora atual estiver DENTRO da janela
+        return now >= windowStart && now <= windowEnd;
       });
 
       if (eligibleUsers.length === 0) {
@@ -187,9 +183,9 @@ export class MorningGreetingService {
         for (const user of batch) {
           const phoneNumber = user.phoneNumber!;
           const message = this.pickMessage();
-          const scheduledTime = this.getScheduledTimeForUser(user.id, currentDateKey, user.wakeTime);
+          const { windowStart } = this.getScheduledWindowForUser(user.id, currentDateKey, user.wakeTime);
 
-          const sendTask = this.sendToUser(phoneNumber, message, scheduledTime)
+          const sendTask = this.sendToUser(phoneNumber, message, windowStart)
             .then(() => {
               this.sentGreetingsToday.add(phoneNumber);
               sentCount++;
