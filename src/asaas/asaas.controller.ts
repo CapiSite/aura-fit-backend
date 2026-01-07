@@ -134,6 +134,8 @@ export class AsaasController {
             email: user.email ?? undefined,
             cpfCnpj: user.cpf ?? '',
             postalCode: digits(dto.postalCode),
+            mobilePhone: digits(user.phoneNumber),
+            phone: digits(user.phoneNumber),
           },
     });
   }
@@ -173,11 +175,30 @@ export class AsaasController {
       throw new HttpException('Nenhuma assinatura ativa', HttpStatus.BAD_REQUEST);
     }
 
-    return this.asaasService.getPlanChangePreview(
+    const result = this.asaasService.getPlanChangePreview(
       userProfile.subscriptionPlan,
       targetPlan as SubscriptionPlan,
       userProfile.subscriptionExpiresAt,
     );
+
+    const action = result.isDowngrade ? 'DOWNGRADE' : 'UPGRADE';
+    const prorataAmount = result.changePrice;
+
+    // Formatar descrição amigável
+    let description = '';
+    if (result.isDowngrade) {
+      description = `Seu plano mudará para ${targetPlan} no final do ciclo atual (em ${result.daysRemaining} dias). Nenhuma cobrança será feita agora.`;
+    } else {
+      description = `Upgrade imediato para ${targetPlan}. Você pagará apenas a diferença proporcional (${prorataAmount > 0 ? 'R$ ' + prorataAmount.toFixed(2) : 'Sem custo'}) pelos ${result.daysRemaining} dias restantes.`;
+    }
+
+    return {
+      action,
+      prorataAmount,
+      nextLink: null,
+      description,
+      daysRemaining: result.daysRemaining
+    };
   }
 
   @Post('webhook')

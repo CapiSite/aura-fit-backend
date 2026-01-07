@@ -65,3 +65,22 @@ export type AsaasWebhookPayload = {
   event?: string;
   payment: AsaasPayment;
 };
+
+export type CreditCardHolderInfoPayload = {
+  name: string;
+  email: string;
+  cpfCnpj: string;
+  postalCode: string;
+  addressNumber?: string;
+  addressComplement?: string;
+  phone?: string;
+  mobilePhone?: string;
+};
+
+export type CreditCardPayload = {
+  holderName: string;
+  number: string;
+  expiryMonth: string;
+  expiryYear: string;
+  ccv: string;
+};

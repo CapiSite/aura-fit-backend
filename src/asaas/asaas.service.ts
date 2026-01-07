@@ -441,13 +441,25 @@ export class AsaasService {
 
   private extractPaymentContext(payment: AsaasPayment): { chatId: string; planCode: SubscriptionPlan } {
     const ext = (payment?.externalReference ?? '').toString();
-    const [planRaw, chatIdFromExt] = ext.split(':');
-    const planValue = (planRaw ?? '').toString().trim().toUpperCase();
+    const parts = ext.split(':');
+
+    let planValue = parts[0];
+    let chatIdFromExt = parts[1];
+
+    // Se tiver prefixo UPGRADE, o plano está na segunda posição
+    if (planValue === 'UPGRADE') {
+      planValue = parts[1] || '';
+      chatIdFromExt = parts[2] || '';
+    }
+
+    planValue = (planValue ?? '').toString().trim().toUpperCase();
+
     let planCode: SubscriptionPlan;
     if (planValue === 'PRO') planCode = SubscriptionPlan.PRO;
     else if (planValue === 'PRO_ANNUAL') planCode = SubscriptionPlan.PRO_ANNUAL;
     else if (planValue === 'PLUS_ANNUAL') planCode = SubscriptionPlan.PLUS_ANNUAL;
     else planCode = SubscriptionPlan.PLUS;
+
     const chatId = chatIdFromExt ?? '';
     return { chatId: String(chatId ?? ''), planCode };
   }
@@ -467,9 +479,9 @@ export class AsaasService {
   }
 
   private resolvePaidAt(payment: AsaasPayment): Date {
-    const raw = payment?.confirmedDate ?? payment?.paymentDate ?? payment?.clientPaymentDate;
-    const parsed = raw ? new Date(raw) : new Date();
-    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    // Usar sempre a data/hora atual do servidor para evitar problemas de timezone
+    // (Asaas retorna datas em UTC que aparecem como dia anterior no Brasil)
+    return new Date();
   }
 
 
@@ -550,20 +562,20 @@ export class AsaasService {
       };
     }
 
-    // UPGRADE: Calcula pro-rata
+    // UPGRADE: Iniciar NOVO ciclo subtraindo crédito dos dias não utilizados
     const isCurrentAnnual = currentPlan.includes('ANNUAL');
     const totalDays = isCurrentAnnual ? 365 : 30;
     const currentRemainingValue = (daysRemaining / totalDays) * currentValue;
 
     const isTargetAnnual = targetPlan.includes('ANNUAL');
-    const targetTotalDays = isTargetAnnual ? 365 : 30;
-    const targetProportionalValue = (daysRemaining / targetTotalDays) * targetValue;
+    const targetFullValue = targetValue; // Novo ciclo completo
 
-    const upgradePrice = Math.max(0, targetProportionalValue - currentRemainingValue);
+    // Preço é o valor cheio do novo plano MENOS o crédito do plano atual
+    const upgradePrice = Math.max(0, targetFullValue - currentRemainingValue);
 
     return {
       changePrice: Number(upgradePrice.toFixed(2)),
-      daysRemaining,
+      daysRemaining: isTargetAnnual ? 365 : 30, // Novo ciclo completo
       canChange: true,
       isDowngrade: false,
     };
@@ -705,9 +717,14 @@ export class AsaasService {
       return false;
     }
 
-    if (receivedAmount + 0.01 < expectedAmount) {
+    const ref = (payment.externalReference || '').toString().toUpperCase();
+    const isUpgrade = ref.startsWith('UPGRADE:');
+
+    this.logger.log(`Payment Validation - ID: ${payment.id}, Ref: ${ref}, IsUpgrade: ${isUpgrade}, Received: ${receivedAmount}, Expected: ${expectedAmount}, Plan: ${planCode}`);
+
+    if (!isUpgrade && receivedAmount + 0.01 < expectedAmount) {
       this.logger.warn(
-        `Pagamento abaixo do esperado. paymentId=${payment.id} expected=${expectedAmount} received=${receivedAmount}`,
+        `Pagamento abaixo do esperado (REJEITADO). paymentId=${payment.id} expected=${expectedAmount} received=${receivedAmount}`,
       );
       return false;
     }
@@ -890,4 +907,7 @@ type CreditCardHolderInfoPayload = {
   cpfCnpj: string;
   postalCode?: string;
   addressNumber?: string;
+  addressComplement?: string;
+  phone?: string;
+  mobilePhone?: string;
 };
