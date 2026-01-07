@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ReminderTransport } from './reminder-transport.interface';
 import { PrismaService } from '../../prisma_connection/prisma.service';
 
@@ -6,7 +7,6 @@ import { PrismaService } from '../../prisma_connection/prisma.service';
 export class MorningGreetingService {
   private readonly logger = new Logger(MorningGreetingService.name);
   private readonly transports: ReminderTransport[] = [];
-  private readonly checkIntervalMs = 5 * 60 * 1000; // verifica a cada 5 minutos
 
   private readonly morningMessages = [
     '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
@@ -19,12 +19,11 @@ export class MorningGreetingService {
     '🎯 Bom dia! Foco e determinação! Mais um dia para alcançar seus objetivos! Posso ajudar em algo?',
   ];
 
-  private greetingTimer?: NodeJS.Timeout;
   private sentGreetingsToday = new Set<string>(); // Rastreia quem já recebeu hoje
   private lastCheckDate: string | null = null;
 
   constructor(private readonly prisma: PrismaService) {
-    this.startScheduler();
+    this.logger.log('MorningGreetingService initialized with cron scheduler');
   }
 
   registerTransport(transport: ReminderTransport) {
@@ -32,13 +31,10 @@ export class MorningGreetingService {
     this.logger.log(`Morning greeting transport registered: ${transport.name}`);
   }
 
-  private startScheduler() {
-    // Verifica imediatamente e depois a cada intervalo
-    void this.sendMorningGreetings();
-    this.greetingTimer = setInterval(
-      () => void this.sendMorningGreetings(),
-      this.checkIntervalMs,
-    );
+  // Executa a cada 5 minutos usando cron
+  @Cron('*/5 * * * *')
+  async handleMorningGreetingCron() {
+    await this.sendMorningGreetings();
   }
 
   private getCurrentDateKey(now: Date): string {
@@ -237,12 +233,5 @@ export class MorningGreetingService {
   private pickMessage(): string {
     const idx = Math.floor(Math.random() * this.morningMessages.length);
     return this.morningMessages[idx] ?? this.morningMessages[0];
-  }
-
-  // Método para limpar o timer ao desligar o serviço
-  onModuleDestroy() {
-    if (this.greetingTimer) {
-      clearInterval(this.greetingTimer);
-    }
   }
 }

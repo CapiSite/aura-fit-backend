@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards, HttpExcept
 import type { Request } from 'express';
 import { AsaasService } from './asaas.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
-import { CreatePlanPaymentDto, PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
+import { CreatePlanPaymentDto, AsaasBillingType } from './dto/create-plan-payment.dto';
 import { UsersService } from '../users/users.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import type { AsaasPayment, AsaasWebhookPayload } from './entities/asaas.types';
@@ -40,7 +40,7 @@ export class AsaasController {
     const yearRaw = digits(dto.creditCardExpiryYear).slice(-2);
     const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
 
-    return this.asaasService.createPlanPayment(dto.plan as PlanCode, customer.id, {
+    return this.asaasService.createPlanPayment(dto.plan, customer.id, {
       dueDate: dto.dueDate,
       paymentMethod,
       chatId: user.phoneNumber,

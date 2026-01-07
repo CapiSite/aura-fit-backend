@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionPlan } from '@prisma/client';
 import { CreateCustomerDto } from './dto/create-customer.dto';
-import { PlanCode, AsaasBillingType } from './dto/create-plan-payment.dto';
+import { AsaasBillingType } from './dto/create-plan-payment.dto';
 import { AsaasCustomer, AsaasPayment, AsaasWebhookPayload } from './entities/asaas.types';
 import { PrismaService } from '../prisma_connection/prisma.service';
 
@@ -103,7 +103,7 @@ export class AsaasService {
   }
 
   async createPlanPayment(
-    planCode: PlanCode,
+    planCode: SubscriptionPlan,
     customerId: string,
     opts: {
       dueDate?: string;
@@ -113,14 +113,35 @@ export class AsaasService {
       chatId?: string;
     },
   ): Promise<AsaasPayment> {
-    const pricing: Record<PlanCode, { value: number; description: string }> = {
-      [PlanCode.PLUS]: {
+    // SECURITY: Block FREE plan from being processed as payment
+    if (planCode === SubscriptionPlan.FREE) {
+      this.logger.warn(`Attempt to process FREE plan as payment blocked`);
+      throw new HttpException(
+        'Plano FREE não pode ser processado via pagamento',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const pricing: Record<SubscriptionPlan, { value: number; description: string }> = {
+      [SubscriptionPlan.FREE]: {
+        value: 0,
+        description: 'Plano Free',
+      },
+      [SubscriptionPlan.PLUS]: {
         value: 29.9,
         description: 'Plano Plus - 20 mensagens/dia e 2 fotos/dia',
       },
-      [PlanCode.PRO]: {
+      [SubscriptionPlan.PRO]: {
         value: 49.9,
         description: 'Plano Pro - 40 mensagens/dia e 5 fotos/dia',
+      },
+      [SubscriptionPlan.PLUS_ANNUAL]: {
+        value: 287.0,
+        description: 'Plano Plus Anual - 20 mensagens/dia e 2 fotos/dia (12 meses)',
+      },
+      [SubscriptionPlan.PRO_ANNUAL]: {
+        value: 479.0,
+        description: 'Plano Pro Anual - 40 mensagens/dia e 5 fotos/dia (12 meses)',
       },
     };
 
@@ -160,6 +181,11 @@ export class AsaasService {
 
     const dueDate = new Date().toISOString().slice(0, 10);
 
+    // AUDIT LOG: Record payment attempt
+    this.logger.log(
+      `Payment creation - User: ${opts.chatId}, Plan: ${planCode}, Value: ${pricingInfo.value}, Method: ${billingType}`,
+    );
+
     const payload: CreatePaymentInput = {
       customerId,
       value: pricingInfo.value,
@@ -183,7 +209,7 @@ export class AsaasService {
       }
     }
     const status = this.getPaymentStatus(payment);
-    const planEnum = this.mapPlanCode(planCode);
+    const planEnum = planCode;
     const contextChatId = opts.chatId ?? this.extractPaymentContext(payment).chatId;
     const paidAt = ['CONFIRMED', 'RECEIVED'].includes(status) ? this.resolvePaidAt(payment) : null;
     await this.upsertPaymentRecord({
@@ -224,7 +250,11 @@ export class AsaasService {
     const ext = (payment?.externalReference ?? '').toString();
     const [planRaw, chatIdFromExt] = ext.split(':');
     const planValue = (planRaw ?? '').toString().trim().toUpperCase();
-    const planCode = planValue === 'PRO' ? SubscriptionPlan.PRO : SubscriptionPlan.PLUS;
+    let planCode: SubscriptionPlan;
+    if (planValue === 'PRO') planCode = SubscriptionPlan.PRO;
+    else if (planValue === 'PRO_ANNUAL') planCode = SubscriptionPlan.PRO_ANNUAL;
+    else if (planValue === 'PLUS_ANNUAL') planCode = SubscriptionPlan.PLUS_ANNUAL;
+    else planCode = SubscriptionPlan.PLUS;
     const chatId = chatIdFromExt ?? '';
     return { chatId: String(chatId ?? ''), planCode };
   }
@@ -249,12 +279,14 @@ export class AsaasService {
     return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   }
 
-  private mapPlanCode(planCode: PlanCode): SubscriptionPlan {
-    return planCode === PlanCode.PRO ? SubscriptionPlan.PRO : SubscriptionPlan.PLUS;
-  }
+
 
   private getPlanAmount(planCode: SubscriptionPlan): number {
-    return planCode === SubscriptionPlan.PRO ? 49.9 : 29.9;
+    if (planCode === SubscriptionPlan.FREE) return 0;
+    if (planCode === SubscriptionPlan.PRO) return 49.9;
+    if (planCode === SubscriptionPlan.PRO_ANNUAL) return 479.0;
+    if (planCode === SubscriptionPlan.PLUS_ANNUAL) return 287.0;
+    return 29.9;
   }
 
   private parseDate(value?: string): Date | null {
@@ -359,8 +391,25 @@ export class AsaasService {
       paidAt,
     });
 
+
     const expectedAmount = this.getPlanAmount(planCode);
     const receivedAmount = Number(payment.value ?? 0);
+
+    // SECURITY: Block FREE plan confirmations (double-check)
+    if (planCode === SubscriptionPlan.FREE) {
+      this.logger.warn(`Attempt to confirm FREE plan payment blocked. paymentId=${payment.id}`);
+      return false;
+    }
+
+    // SECURITY: Minimum payment value validation
+    const minAmount = 1.0;
+    if (receivedAmount < minAmount) {
+      this.logger.warn(
+        `Pagamento muito baixo rejeitado. paymentId=${payment.id} received=${receivedAmount} min=${minAmount}`,
+      );
+      return false;
+    }
+
     if (receivedAmount + 0.01 < expectedAmount) {
       this.logger.warn(
         `Pagamento abaixo do esperado. paymentId=${payment.id} expected=${expectedAmount} received=${receivedAmount}`,
@@ -377,7 +426,8 @@ export class AsaasService {
     if (alreadyApplied) return false;
 
     const expiresAt = new Date(paidAt);
-    expiresAt.setDate(expiresAt.getDate() + 30);
+    const isAnnualPlan = planCode === SubscriptionPlan.PLUS_ANNUAL || planCode === SubscriptionPlan.PRO_ANNUAL;
+    expiresAt.setDate(expiresAt.getDate() + (isAnnualPlan ? 365 : 30));
 
     await this.prisma.userProfile.update({
       where: { phoneNumber: String(chatId) },

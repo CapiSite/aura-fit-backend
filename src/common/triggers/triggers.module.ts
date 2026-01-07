@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { UsersModule } from '../../users/users.module';
 import { PrismaModule } from '../../prisma_connection/prisma.module';
 import { ReminderService } from './reminder.service';
 import { MorningGreetingService } from './morning-greeting.service';
 
 @Module({
-  imports: [UsersModule, PrismaModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    UsersModule,
+    PrismaModule,
+  ],
   providers: [ReminderService, MorningGreetingService],
   exports: [ReminderService, MorningGreetingService],
 })

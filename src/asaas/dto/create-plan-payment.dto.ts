@@ -1,9 +1,5 @@
 import { IsEnum, IsOptional, IsString, ValidateIf } from 'class-validator';
-
-export enum PlanCode {
-  PLUS = 'PLUS',
-  PRO = 'PRO',
-}
+import { SubscriptionPlan } from '@prisma/client';
 
 export enum AsaasBillingType {
   CREDIT_CARD = 'CREDIT_CARD',
@@ -11,8 +7,8 @@ export enum AsaasBillingType {
 }
 
 export class CreatePlanPaymentDto {
-  @IsEnum(PlanCode)
-  plan: PlanCode;
+  @IsEnum(SubscriptionPlan)
+  plan: SubscriptionPlan;
 
   @IsEnum(AsaasBillingType)
   @IsOptional()
