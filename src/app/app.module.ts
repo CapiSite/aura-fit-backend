@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import gptConfig from '../config/gpt.config';
 import whatsappConfig from '../config/whatsapp.config';
 import asaasConfig from '../config/asaas.config';
@@ -26,6 +27,10 @@ import { ConfigValidationService } from '../common/config/config-validation.serv
         emailConfig,
       ],
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // 60 segundos
+      limit: 10, // 10 requisições por minuto (padrão)
+    }]),
 
     GptModule,
     AuthModule,

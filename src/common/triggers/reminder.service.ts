@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { ReminderTransport } from './reminder-transport.interface';
 import { UsersService } from '../../users/users.service';
 import { PrismaService } from '../../prisma_connection/prisma.service';
@@ -7,8 +8,7 @@ import { PrismaService } from '../../prisma_connection/prisma.service';
 export class ReminderService {
   private readonly logger = new Logger(ReminderService.name);
   private readonly transports: ReminderTransport[] = [];
-  private readonly checkIntervalMs = 15 * 60 * 1000; // verifica a cada 15 minutos
-  private readonly activeHours = { start: 6, end: 23 }; // janela diária
+  private readonly activeHours = { start: 6, end: 23 };
   private readonly messages = [
     'Bora beber água antes que a sede vire drama.',
     'Seu corpo pediu: água. Seu eu futuro agradece.',
@@ -17,13 +17,12 @@ export class ReminderService {
     'Recarrega aí: água é bateria do corpo.',
     'Água agora. A sua melhor decisão em 3 segundos.'
   ];
-  private reminderTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly usersService: UsersService,
     private readonly prisma: PrismaService,
   ) {
-    this.startScheduler();
+    this.logger.log('ReminderService initialized with cron scheduler');
   }
 
   registerTransport(transport: ReminderTransport) {
@@ -31,13 +30,12 @@ export class ReminderService {
     this.logger.log(`Reminder transport registered: ${transport.name}`);
   }
 
-  private startScheduler() {
-    // dispara de imediato e depois a cada intervalo
-    void this.sendWaterReminders();
-    this.reminderTimer = setInterval(
-      () => void this.sendWaterReminders(),
-      this.checkIntervalMs,
-    );
+  @Cron('*/15 * * * *', {
+    name: 'water-reminder-check',
+    timeZone: 'America/Sao_Paulo',
+  })
+  async handleWaterRemindersCron() {
+    await this.sendWaterReminders();
   }
 
   private isWithinActiveWindow(now: Date) {
@@ -57,15 +55,13 @@ export class ReminderService {
     }
 
     try {
-      // ✅ QUERY OTIMIZADA: Só busca usuários elegíveis E ATIVOS
       const users = await this.prisma.userProfile.findMany({
         where: {
           waterReminderEnabled: true,
           waterReminderIntervalMinutes: { not: null },
-          // ✅ Apenas usuários com assinatura ativa
           OR: [
-            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida
-            { isPaymentActive: true }, // Ou pagamento ativo
+            { subscriptionExpiresAt: { gt: now } },
+            { isPaymentActive: true },
           ],
         },
         select: {
@@ -83,44 +79,60 @@ export class ReminderService {
 
       const message = this.pickMessage();
 
-      for (const user of users) {
-        const intervalMinutes = user.waterReminderIntervalMinutes!;
-        const lastSent = user.waterReminderLastSent
-          ? new Date(user.waterReminderLastSent)
-          : null;
+      // Batch processing
+      const BATCH_SIZE = 50;
+      let sentCount = 0;
+      let failedCount = 0;
 
-        const intervalMs = intervalMinutes * 60 * 1000;
-        if (lastSent && now.getTime() - lastSent.getTime() < intervalMs) {
-          continue; // Ainda não chegou a hora
-        }
+      for (let i = 0; i < users.length; i += BATCH_SIZE) {
+        const batch = users.slice(i, i + BATCH_SIZE);
 
-        const phoneNumber = user.phoneNumber;
-        if (!phoneNumber) continue; // Pula se não tem telefone
+        const sendPromises = batch.map(async (user) => {
+          const intervalMinutes = user.waterReminderIntervalMinutes!;
+          const lastSent = user.waterReminderLastSent
+            ? new Date(user.waterReminderLastSent)
+            : null;
 
-        for (const transport of this.transports) {
+          const intervalMs = intervalMinutes * 60 * 1000;
+          if (lastSent && now.getTime() - lastSent.getTime() < intervalMs) {
+            return;
+          }
+
+          const phoneNumber = user.phoneNumber;
+          if (!phoneNumber) return;
+
           try {
-            await transport.send(phoneNumber, message);
+            for (const transport of this.transports) {
+              await transport.send(phoneNumber, message);
+            }
+
+            await this.prisma.userProfile.update({
+              where: { id: user.id },
+              data: { waterReminderLastSent: now },
+            });
+
+            sentCount++;
           } catch (error) {
             this.logger.warn(
-              `Failed to send water reminder via ${transport.name} to ${phoneNumber}`,
+              `Failed to send water reminder to ${phoneNumber}`,
               error as Error,
             );
+            failedCount++;
           }
-        }
+        });
 
-        // Atualiza o último envio no banco
-        try {
-          await this.prisma.userProfile.update({
-            where: { id: user.id },
-            data: { waterReminderLastSent: now },
-          });
-        } catch (error) {
-          this.logger.warn(
-            `Failed to update waterReminderLastSent for ${phoneNumber}`,
-            error as Error,
-          );
+        // Processa batch
+        await Promise.allSettled(sendPromises);
+
+        // Delay entre batches
+        if (i + BATCH_SIZE < users.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
+
+      this.logger.log(
+        `Water reminders complete: Sent=${sentCount}, Failed=${failedCount}, Total=${users.length}`
+      );
     } catch (error) {
       this.logger.error('Failed to send water reminders', error as Error);
     }

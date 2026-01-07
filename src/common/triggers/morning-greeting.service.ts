@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { ReminderTransport } from './reminder-transport.interface';
 import { PrismaService } from '../../prisma_connection/prisma.service';
 
@@ -31,30 +31,25 @@ export class MorningGreetingService {
     this.logger.log(`Morning greeting transport registered: ${transport.name}`);
   }
 
-  // Executa a cada 5 minutos usando cron
-  @Cron('*/5 * * * *')
+  @Cron(CronExpression.EVERY_5_MINUTES, {
+    name: 'morning-greeting-check',
+    timeZone: 'America/Sao_Paulo',
+  })
   async handleMorningGreetingCron() {
     await this.sendMorningGreetings();
   }
 
   private getCurrentDateKey(now: Date): string {
-    // Retorna uma chave única para o dia (YYYY-MM-DD)
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }
 
-  /**
-   * Calcula a janela de envio baseada no wakeTime do usuário.
-   * Se o usuário acorda às 7h, a janela é 7:00-7:30 (30 minutos).
-   * Se não tiver wakeTime, usa janela padrão de 6:00-6:30.
-   * A mensagem SOMENTE será enviada se a hora atual estiver DENTRO desta janela.
-   */
+  // Calcula janela de 30min baseada no wakeTime do usuario
   private getScheduledWindowForUser(
     userId: number,
     dateKey: string,
     wakeTime: string | null
   ): { windowStart: Date; windowEnd: Date } {
-    // Parse do wakeTime (formato esperado: "HH:mm" ou "HH:MM")
-    let baseHour = 6; // Padrão se não tiver wakeTime
+    let baseHour = 6;
     let baseMinute = 0;
 
     if (wakeTime) {
@@ -69,28 +64,20 @@ export class MorningGreetingService {
       }
     }
 
-    // A janela é de 30 minutos a partir do wakeTime
     const WINDOW_DURATION_MINUTES = 30;
 
-    // Início da janela: exatamente no wakeTime
     const [year, month, day] = dateKey.split('-').map(Number);
     const windowStart = new Date();
     windowStart.setFullYear(year, month - 1, day);
     windowStart.setHours(baseHour, baseMinute, 0, 0);
 
-    // Fim da janela: wakeTime + 30 minutos
     const windowEnd = new Date(windowStart);
     windowEnd.setMinutes(windowEnd.getMinutes() + WINDOW_DURATION_MINUTES);
 
     return { windowStart, windowEnd };
   }
 
-  /**
-   * Verifica se está em uma janela AMPLA válida para verificação.
-   * Janela 5h-13h é apenas para VERIFICAR (não enviar ainda).
-   * O envio real só acontece se estiver dentro da janela do wakeTime do usuário (30 min).
-   * Exemplo: Se usuário acorda às 7h, só recebe entre 7:00-7:30, mesmo que estejamos às 10h.
-   */
+  // Verifica se esta dentro da janela de verificacao (5h-11h)
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
     return hour >= 5 && hour < 11;
@@ -109,7 +96,6 @@ export class MorningGreetingService {
       this.logger.log(`New day detected: ${currentDateKey}. Resetting greeting tracker.`);
     }
 
-    // Verifica se está dentro da janela de verificação (5h-14h)
     if (!this.isWithinCheckWindow(now)) {
       this.logger.debug(`Outside check window (current hour: ${now.getHours()}). Skipping.`);
       return;
@@ -121,13 +107,11 @@ export class MorningGreetingService {
     }
 
     try {
-      // Busca usuários ativos - inclui FREE (3 dias de teste), PLUS e PRO
-      // FREE só funciona enquanto subscriptionExpiresAt > now (3 dias após registro)
       const users = await this.prisma.userProfile.findMany({
         where: {
           OR: [
-            { subscriptionExpiresAt: { gt: now } }, // Assinatura válida (FREE tem 3 dias, PLUS/PRO conforme contratado)
-            { isPaymentActive: true }, // Ou pagamento ativo
+            { subscriptionExpiresAt: { gt: now } },
+            { isPaymentActive: true },
           ],
         },
         select: {
@@ -151,10 +135,7 @@ export class MorningGreetingService {
         if (!user.phoneNumber || !user.isActive) return false;
         if (this.sentGreetingsToday.has(user.phoneNumber)) return false;
 
-        // Calcula a janela de horário válida para este usuário
         const { windowStart, windowEnd } = this.getScheduledWindowForUser(user.id, currentDateKey, user.wakeTime);
-
-        // Só envia se a hora atual estiver DENTRO da janela
         return now >= windowStart && now <= windowEnd;
       });
 
@@ -166,7 +147,7 @@ export class MorningGreetingService {
       this.logger.log(`${eligibleUsers.length} users are eligible for greetings now`);
 
       const BATCH_SIZE = 50;
-      const CONCURRENT_SENDS = 5; // Máximo de envios simultâneos
+      const CONCURRENT_SENDS = 5;
       let sentCount = 0;
       let failedCount = 0;
 
@@ -194,17 +175,17 @@ export class MorningGreetingService {
           sendPromises.push(sendTask);
 
           if (sendPromises.length >= CONCURRENT_SENDS) {
-            await Promise.all(sendPromises);
-            sendPromises.length = 0; // Limpa para próximo conjunto
+            await Promise.allSettled(sendPromises);
+            sendPromises.length = 0;
           }
         }
 
-        // Aguarda todas as promises restantes do lote
+        // Aguarda promises restantes do lote
         await Promise.allSettled(sendPromises);
 
         if (i + BATCH_SIZE < eligibleUsers.length) {
           const nextBatchSize = Math.min(BATCH_SIZE, eligibleUsers.length - i - BATCH_SIZE);
-          const delay = Math.min(nextBatchSize * 50, 2000); // 50ms por usuário, máx 2s
+          const delay = Math.min(nextBatchSize * 50, 2000);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }

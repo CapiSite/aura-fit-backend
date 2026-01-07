@@ -1,7 +1,8 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionPlan } from '@prisma/client';
-import { CreateCustomerDto } from './dto/create-customer.dto';
+import { PLAN_CHANGE_CONFIG } from './config/plan-change.config';
+import type { CreateCustomerDto } from './dto/create-customer.dto';
 import { AsaasBillingType } from './dto/create-plan-payment.dto';
 import { AsaasCustomer, AsaasPayment, AsaasWebhookPayload } from './entities/asaas.types';
 import { PrismaService } from '../prisma_connection/prisma.service';
@@ -225,6 +226,198 @@ export class AsaasService {
     return payment;
   }
 
+  async createPlanChangePayment(
+    userId: number,
+    targetPlan: SubscriptionPlan,
+    customerId: string,
+    opts: {
+      paymentMethod?: AsaasBillingType;
+      creditCard?: CreditCardPayload;
+      holderInfo?: CreditCardHolderInfoPayload;
+      chatId?: string;
+    },
+  ): Promise<{ payment?: AsaasPayment; changeInfo: any }> {
+    // SECURITY: Bloquear plano FREE
+    if (targetPlan === SubscriptionPlan.FREE) {
+      this.logger.warn(`Tentativa de mudança para FREE bloqueada - User: ${userId}, ChatId: ${opts.chatId}`);
+      throw new HttpException(
+        'Não é possível fazer downgrade para plano FREE',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const user = await this.prisma.userProfile.findUnique({
+      where: { id: userId },
+      select: {
+        subscriptionPlan: true,
+        subscriptionExpiresAt: true,
+        isPaymentActive: true,
+        pendingPlan: true,
+      },
+    });
+
+    if (!user) {
+      throw new HttpException('Usuário não encontrado', HttpStatus.NOT_FOUND);
+    }
+
+    if (!user.isPaymentActive || !user.subscriptionExpiresAt) {
+      throw new HttpException('Nenhuma assinatura ativa para alterar', HttpStatus.BAD_REQUEST);
+    }
+
+    // SECURITY: Validar que assinatura não expirou
+    if (new Date(user.subscriptionExpiresAt) <= new Date()) {
+      throw new HttpException('Assinatura expirada', HttpStatus.BAD_REQUEST);
+    }
+
+    // Calcular mudança de plano
+    const planChange = this.calculatePlanChange(
+      user.subscriptionPlan,
+      targetPlan,
+      user.subscriptionExpiresAt,
+    );
+
+    if (!planChange.canChange) {
+      throw new HttpException(
+        planChange.reason || 'Mudança de plano não permitida',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // DOWNGRADE: Agendar para próximo ciclo (sem cobrança)
+    if (planChange.isDowngrade) {
+      // SECURITY: Verificar se não há pagamento pendente (evitar race condition)
+      const pendingPayments = await this.prisma.payment.count({
+        where: {
+          userId,
+          status: { in: ['PENDING', 'PENDING_PIX'] },
+          createdAt: { gte: new Date(Date.now() - PLAN_CHANGE_CONFIG.PENDING_PAYMENT_WINDOW_MS) },
+        },
+      });
+
+      if (pendingPayments > 0) {
+        throw new HttpException(
+          'Você tem um pagamento pendente. Aguarde a confirmação antes de agendar downgrade.',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      await this.prisma.userProfile.update({
+        where: { id: userId },
+        data: { pendingPlan: targetPlan },
+      });
+
+      const userHash = opts.chatId ? opts.chatId.slice(-4) : 'unknown';
+      this.logger.log(
+        `Downgrade agendado - UserHash: ****${userHash}, From: ${user.subscriptionPlan}, To: ${targetPlan}`,
+      );
+
+      return {
+        changeInfo: {
+          changed: false,
+          scheduled: true,
+          isDowngrade: true,
+          charged: false,
+          currentPlan: user.subscriptionPlan,
+          targetPlan,
+          daysRemaining: planChange.daysRemaining,
+          effectiveDate: user.subscriptionExpiresAt,
+        },
+      };
+    }
+
+    // UPGRADE: Cobrar diferença e ativar imediatamente
+    if (planChange.changePrice < PLAN_CHANGE_CONFIG.FREE_UPGRADE_THRESHOLD) {
+      // SECURITY: Usar transação para garantir atomicidade
+      await this.prisma.$transaction(async (tx) => {
+        // Revalidar dentro da transação para evitar race condition
+        const currentUser = await tx.userProfile.findUnique({
+          where: { id: userId },
+          select: { subscriptionPlan: true, isPaymentActive: true, subscriptionExpiresAt: true },
+        });
+
+        if (!currentUser?.isPaymentActive || !currentUser.subscriptionExpiresAt) {
+          throw new HttpException('Assinatura inválida', HttpStatus.BAD_REQUEST);
+        }
+
+        if (new Date(currentUser.subscriptionExpiresAt) <= new Date()) {
+          throw new HttpException('Assinatura expirada', HttpStatus.BAD_REQUEST);
+        }
+
+        await tx.userProfile.update({
+          where: {
+            id: userId,
+            subscriptionPlan: currentUser.subscriptionPlan,
+            isPaymentActive: true,
+          },
+          data: {
+            subscriptionPlan: targetPlan,
+            pendingPlan: null,
+          },
+        });
+      });
+
+      const userHash = opts.chatId ? opts.chatId.slice(-4) : 'unknown';
+      this.logger.log(
+        `Free upgrade - UserHash: ****${userHash}, From: ${user.subscriptionPlan}, To: ${targetPlan}`,
+      );
+
+      return {
+        changeInfo: {
+          changed: true,
+          scheduled: false,
+          isDowngrade: false,
+          charged: false,
+          upgradePrice: 0,
+          daysRemaining: planChange.daysRemaining,
+        },
+      };
+    }
+
+    // Criar pagamento para upgrade
+    const billingType = opts.paymentMethod ?? AsaasBillingType.CREDIT_CARD;
+    const description = `Upgrade de ${user.subscriptionPlan} para ${targetPlan} (${planChange.daysRemaining} dias)`;
+
+    this.logger.log(
+      `Upgrade payment - User: ${opts.chatId}, From: ${user.subscriptionPlan}, To: ${targetPlan}, Days: ${planChange.daysRemaining}, Price: ${planChange.changePrice}`,
+    );
+
+    const dueDate = new Date().toISOString().slice(0, 10);
+    const payload: CreatePaymentInput = {
+      customerId,
+      value: planChange.changePrice,
+      dueDate,
+      description,
+      externalReference: `UPGRADE:${targetPlan}:${opts.chatId}:${Date.now()}`,
+      creditCard: opts.creditCard,
+      creditCardHolderInfo: opts.holderInfo,
+      billingType,
+    };
+
+    const payment = await this.createPayment(payload);
+
+    await this.upsertPaymentRecord({
+      payment,
+      status: this.getPaymentStatus(payment),
+      plan: targetPlan,
+      chatId: opts.chatId || '',
+      paidAt: null,
+    });
+
+    return {
+      payment,
+      changeInfo: {
+        changed: false,
+        scheduled: false,
+        isDowngrade: false,
+        charged: true,
+        upgradePrice: planChange.changePrice,
+        daysRemaining: planChange.daysRemaining,
+        currentPlan: user.subscriptionPlan,
+        targetPlan,
+      },
+    };
+  }
+
   async handleWebhook(body: AsaasWebhookPayload | AsaasPayment, token?: string) {
     if (this.webhookToken && token !== this.webhookToken) {
       throw new HttpException('Unauthorized webhook', HttpStatus.UNAUTHORIZED);
@@ -287,6 +480,108 @@ export class AsaasService {
     if (planCode === SubscriptionPlan.PRO_ANNUAL) return 479.0;
     if (planCode === SubscriptionPlan.PLUS_ANNUAL) return 287.0;
     return 29.9;
+  }
+
+  private calculatePlanChange(
+    currentPlan: SubscriptionPlan,
+    targetPlan: SubscriptionPlan,
+    subscriptionExpiresAt: Date,
+  ): {
+    changePrice: number;
+    daysRemaining: number;
+    canChange: boolean;
+    isDowngrade: boolean;
+    reason?: string;
+  } {
+    const now = new Date();
+    const expiresAt = new Date(subscriptionExpiresAt);
+
+    // Validação 1: Plano expirado
+    if (expiresAt <= now) {
+      return {
+        changePrice: 0,
+        daysRemaining: 0,
+        canChange: false,
+        isDowngrade: false,
+        reason: 'Plano expirado'
+      };
+    }
+
+    // Validação 2: Mesmo plano
+    if (currentPlan === targetPlan) {
+      return {
+        changePrice: 0,
+        daysRemaining: 0,
+        canChange: false,
+        isDowngrade: false,
+        reason: 'Mesmo plano'
+      };
+    }
+
+    const currentValue = this.getPlanAmount(currentPlan);
+    const targetValue = this.getPlanAmount(targetPlan);
+
+    // SECURITY: Validar valores de plano
+    const validPrices: number[] = PLAN_CHANGE_CONFIG.VALID_PRICES as unknown as number[];
+    if (currentValue < 0 || targetValue < 0) {
+      this.logger.error(`Valores negativos detectados: current=${currentValue}, target=${targetValue}`);
+      throw new HttpException('Erro no cálculo de preço', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    if (!validPrices.includes(currentValue) || !validPrices.includes(targetValue)) {
+      this.logger.error(
+        `Valores inesperados: current=${currentValue}, target=${targetValue}, currentPlan=${currentPlan}, targetPlan=${targetPlan}`,
+      );
+      throw new HttpException('Erro no cálculo de preço', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    const daysRemaining = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Determinar se é upgrade ou downgrade
+    const isDowngrade = targetValue < currentValue && !this.isAnnualUpgrade(currentPlan, targetPlan);
+
+    // DOWNGRADE: Agendado para próximo ciclo (sem cobrança)
+    if (isDowngrade) {
+      return {
+        changePrice: 0,
+        daysRemaining,
+        canChange: true,
+        isDowngrade: true,
+      };
+    }
+
+    // UPGRADE: Calcula pro-rata
+    const isCurrentAnnual = currentPlan.includes('ANNUAL');
+    const totalDays = isCurrentAnnual ? 365 : 30;
+    const currentRemainingValue = (daysRemaining / totalDays) * currentValue;
+
+    const isTargetAnnual = targetPlan.includes('ANNUAL');
+    const targetTotalDays = isTargetAnnual ? 365 : 30;
+    const targetProportionalValue = (daysRemaining / targetTotalDays) * targetValue;
+
+    const upgradePrice = Math.max(0, targetProportionalValue - currentRemainingValue);
+
+    return {
+      changePrice: Number(upgradePrice.toFixed(2)),
+      daysRemaining,
+      canChange: true,
+      isDowngrade: false,
+    };
+  }
+
+  private isAnnualUpgrade(current: SubscriptionPlan, target: SubscriptionPlan): boolean {
+    const monthlyPlans: SubscriptionPlan[] = [SubscriptionPlan.PLUS, SubscriptionPlan.PRO];
+    const annualPlans: SubscriptionPlan[] = [SubscriptionPlan.PLUS_ANNUAL, SubscriptionPlan.PRO_ANNUAL];
+    return monthlyPlans.includes(current) && annualPlans.includes(target);
+  }
+
+  // Método público para preview de mudança de plano (usado pelo controller)
+  getPlanChangePreview(
+    currentPlan: SubscriptionPlan,
+    targetPlan: SubscriptionPlan,
+    subscriptionExpiresAt: Date,
+  ) {
+    return this.calculatePlanChange(currentPlan, targetPlan, subscriptionExpiresAt);
   }
 
   private parseDate(value?: string): Date | null {
@@ -425,18 +720,33 @@ export class AsaasService {
 
     if (alreadyApplied) return false;
 
+    // Buscar pendingPlan antes de atualizar
+    const fullProfile = await this.prisma.userProfile.findUnique({
+      where: { phoneNumber: String(chatId) },
+      select: { pendingPlan: true },
+    });
+
+    // Se existe pendingPlan, usar esse plano ao invés do planCode do pagamento
+    // Isso aplica o downgrade agendado no próximo ciclo
+    const finalPlan = fullProfile?.pendingPlan || planCode;
+
+    this.logger.log(
+      `Applying payment - chatId: ${chatId}, paymentPlan: ${planCode}, finalPlan: ${finalPlan}, hadPendingPlan: ${!!fullProfile?.pendingPlan}`,
+    );
+
     const expiresAt = new Date(paidAt);
-    const isAnnualPlan = planCode === SubscriptionPlan.PLUS_ANNUAL || planCode === SubscriptionPlan.PRO_ANNUAL;
+    const isAnnualPlan = finalPlan === SubscriptionPlan.PLUS_ANNUAL || finalPlan === SubscriptionPlan.PRO_ANNUAL;
     expiresAt.setDate(expiresAt.getDate() + (isAnnualPlan ? 365 : 30));
 
     await this.prisma.userProfile.update({
       where: { phoneNumber: String(chatId) },
       data: {
-        subscriptionPlan: planCode,
+        subscriptionPlan: finalPlan,
         isPaymentActive: true,
         lastPaymentAt: paidAt,
         subscriptionExpiresAt: expiresAt,
         nextBillingAt: expiresAt,
+        pendingPlan: null, // Limpar pendingPlan após aplicar
       },
     });
 

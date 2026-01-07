@@ -39,6 +39,7 @@ model UserProfile {
   nextBillingAt                DateTime?
   subscriptionExpiresAt        DateTime?
   subscriptionPlan             SubscriptionPlan     @default(FREE)
+  pendingPlan                  SubscriptionPlan? // Plano agendado para próximo ciclo (downgrades)
   planStyle                    PlanStyle?
   requestsLastReset            DateTime?
   requestsToday                Int                  @default(0)
