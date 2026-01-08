@@ -271,25 +271,44 @@ export class WhatsappService implements OnModuleInit {
           break;
         }
 
-        // Remove primeira mensagem da fila
-        const message = queue.shift();
+        const firstMsg = queue.shift();
+        if (!firstMsg) continue;
+
+        let combinedText = firstMsg.text;
+        let combinedImageUrl = firstMsg.imageUrl;
+
+        while (queue.length > 0) {
+          const nextMsg = queue[0];
+
+          if (combinedImageUrl && nextMsg.imageUrl) {
+            break;
+          }
+
+          const consumed = queue.shift()!;
+          combinedText += '\n' + consumed.text;
+
+          if (consumed.imageUrl) {
+            combinedImageUrl = consumed.imageUrl;
+          }
+        }
+
         this.messageQueues.set(phone, queue);
 
-        if (!message) continue;
-
         console.log(
-          `Processing message from queue for ${phone}: ${message.text} (Remaining: ${queue.length})`,
+          `Processing message batch for ${phone}: ${combinedText.substring(0, 100)}... ${combinedImageUrl ? '(with image)' : ''}`,
         );
 
         try {
           const response = await this.gptService.generateResponse(
-            message.text,
+            combinedText,
             phone,
-            message.imageUrl,
+            combinedImageUrl,
           );
 
           // Se a resposta for uma mensagem de erro, verifica cooldown
-          const isErrorMessage = response.includes('Aguarde um momento') || response.includes('problema temporário') || response.includes('dificuldades técnicas');
+          const isErrorMessage = response.includes('Aguarde um momento') ||
+            response.includes('problema temporário') ||
+            response.includes('dificuldades técnicas');
 
           if (isErrorMessage) {
             const lastError = this.lastErrorSent.get(phone) || 0;
@@ -308,12 +327,12 @@ export class WhatsappService implements OnModuleInit {
 
           await this.sendText({ phone, message: response });
         } catch (error) {
-          console.error('Error generating GPT response for WhatsApp:', error);
+          console.error('Error generating AI response for WhatsApp:', error);
 
           // Verifica cooldown antes de enviar mensagem de erro genérica
           const lastError = this.lastErrorSent.get(phone) || 0;
           const now = Date.now();
-          const errorCooldown = 30 * 1000; // 30 segundos
+          const errorCooldown = 30 * 1000;
 
           if (now - lastError >= errorCooldown) {
             await this.sendText({
@@ -325,8 +344,7 @@ export class WhatsappService implements OnModuleInit {
           }
         }
 
-        // Pequeno delay entre mensagens para evitar sobrecarga
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Delay removido para máxima velocidade
       }
     } finally {
       // Remove marca de processamento
