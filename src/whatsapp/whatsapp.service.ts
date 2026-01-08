@@ -28,6 +28,7 @@ export class WhatsappService implements OnModuleInit {
   private readonly messageQueues = new Map<string, Array<{ text: string, imageUrl?: string }>>(); // phone -> message queue
   private readonly processingQueues = new Map<string, boolean>(); // phone -> isProcessing queue
   private readonly lastErrorSent = new Map<string, number>(); // phone -> timestamp
+  private readonly messageTimers = new Map<string, NodeJS.Timeout>(); // Gerencia timers de debounce
 
   private readonly lockFilePath = path.join(
     os.tmpdir(),
@@ -522,11 +523,23 @@ export class WhatsappService implements OnModuleInit {
         `Added message to queue for ${phone}: ${textMessage || '[Image]'} (Queue size: ${queue.length})`,
       );
 
-      // Inicia processamento da fila se não estiver processando
+      // DEBOUNCE REAL: Cancela timer anterior se existir
+      if (this.messageTimers.has(phone)) {
+        clearTimeout(this.messageTimers.get(phone)!);
+      }
+
+      // Se não estiver processando, agenda/reagenda o início
       if (!this.processingQueues.get(phone)) {
-        this.processMessageQueue(phone).catch(err => {
-          console.error(`Error processing queue for ${phone}:`, err);
-        });
+        const timer = setTimeout(() => {
+          this.messageTimers.delete(phone);
+          if (!this.processingQueues.get(phone)) {
+            this.processMessageQueue(phone).catch(err => {
+              console.error(`Error processing queue for ${phone}:`, err);
+            });
+          }
+        }, 2000);
+
+        this.messageTimers.set(phone, timer);
       }
     }
 
