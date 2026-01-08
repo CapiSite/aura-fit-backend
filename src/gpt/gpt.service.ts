@@ -26,7 +26,7 @@ export class GptService {
 
     if (!apiKey) {
       this.logger.warn(
-        'OPENAI_API_KEY is not set. GPT responses are disabled.',
+        'API Key não configurada. Respostas de IA desabilitadas.',
       );
       this.client = null;
       this.model = '';
@@ -108,12 +108,12 @@ export class GptService {
         let rawText: string;
 
         if (this.assistantId) {
-          console.log('GPT Assistants: using assistant', this.assistantId);
+          console.log('AI Assistants: using assistant', this.assistantId);
           let threadId = profile.assistantThreadId ?? null;
           if (!threadId) {
             const created = await this.client.beta.threads.create({});
             threadId = created.id;
-            console.log('GPT Assistants: thread created', threadId);
+            console.log('AI Assistants: thread created', threadId);
             if (profile) {
               await this.prisma.userProfile.update({
                 where: { phoneNumber: prismaChatId },
@@ -121,7 +121,7 @@ export class GptService {
               });
             }
           } else {
-            console.log('GPT Assistants: reusing thread', threadId);
+            console.log('AI Assistants: reusing thread', threadId);
           }
 
           const messageContent: any[] = [
@@ -155,7 +155,7 @@ export class GptService {
             })) as any,
           });
 
-          console.log('GPT Assistants: run started', run.id);
+          console.log('AI Assistants: run started', run.id);
 
           for (; ;) {
             const currentRun = await this.client.beta.threads.runs.retrieve(
@@ -168,7 +168,7 @@ export class GptService {
                 currentRun.status,
               )
             ) {
-              console.log('GPT Assistants: run status', currentRun.status);
+              console.log('AI Assistants: run status', currentRun.status);
               if (currentRun.status !== 'completed') {
                 throw new Error(`Assistant run ${currentRun.status}`);
               }
@@ -176,7 +176,7 @@ export class GptService {
             }
 
             if (currentRun.status === 'requires_action') {
-              console.log('GPT Assistants: run requires action');
+              console.log('AI Assistants: run requires action');
               const toolCalls =
                 currentRun.required_action?.submit_tool_outputs.tool_calls ??
                 [];
@@ -206,7 +206,7 @@ export class GptService {
                 thread_id: threadId,
                 tool_outputs: toolOutputs,
               });
-              console.log('GPT Assistants: tool outputs submitted');
+              console.log('AI Assistants: tool outputs submitted');
             }
 
             await new Promise((r) => setTimeout(r, 800));
@@ -216,7 +216,7 @@ export class GptService {
             order: 'desc',
             limit: 5,
           });
-          console.log('GPT Assistants: messages fetched', msgs.data.length);
+          console.log('AI Assistants: messages fetched', msgs.data.length);
           const msg =
             msgs.data.find((m) => m.role === 'assistant') ?? msgs.data[0];
           rawText = (msg?.content ?? [])
@@ -224,7 +224,7 @@ export class GptService {
             .join('\n')
             .trim();
         } else {
-          console.log('GPT Chat Completions: using model', this.model);
+          console.log('AI Chat: using model', this.model);
           const messages: any[] = [
             {
               role: 'user',
@@ -256,7 +256,7 @@ export class GptService {
           return 'Não consegui gerar uma resposta agora.';
         }
 
-        console.log('--- RESPOSTA RECEBIDA DO GPT ---', rawText);
+        console.log('--- RESPOSTA RECEBIDA DA IA ---', rawText);
 
         try {
           const parsedResponse = JSON.parse(rawText);
@@ -288,18 +288,18 @@ export class GptService {
         }
         if (status === 403 || status === 401) {
           this.logger.error(
-            'Acesso ao GPT negado (401/403). Verifique a chave da API e permissões.',
+            'Acesso negado.',
             error as Error,
           );
-          return 'Configuração de acesso ao GPT inválida. Verifique a chave da API.';
+          return 'Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.';
         }
 
-        this.logger.error('Erro ao gerar resposta no GPT', error as Error);
-        return 'Tive um problema para falar com o GPT agora. Tente novamente em instantes.';
+        this.logger.error('Erro ao gerar resposta', error as Error);
+        return 'Aguarde um momento e tente novamente.';
       }
     }
 
-    return 'O GPT está sobrecarregado. Tente novamente em instantes.';
+    return 'Estamos sobrecarregados. Tente novamente em instantes.';
   }
 
   private serializeProfile(profile: unknown): string {

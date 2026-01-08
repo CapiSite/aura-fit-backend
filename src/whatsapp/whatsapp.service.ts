@@ -25,6 +25,9 @@ export class WhatsappService implements OnModuleInit {
   private readonly clientToken: string;
   private readonly webhookMessages = new Map<string, any[]>();
   private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
+  private readonly messageQueues = new Map<string, Array<{ text: string, imageUrl?: string }>>(); // phone -> message queue
+  private readonly processingQueues = new Map<string, boolean>(); // phone -> isProcessing queue
+  private readonly lastErrorSent = new Map<string, number>(); // phone -> timestamp
 
   private readonly lockFilePath = path.join(
     os.tmpdir(),
@@ -256,6 +259,87 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  private async processMessageQueue(phone: string) {
+    // Marca como processando
+    this.processingQueues.set(phone, true);
+
+    try {
+      while (true) {
+        const queue = this.messageQueues.get(phone) || [];
+
+        if (queue.length === 0) {
+          break;
+        }
+
+        // Remove primeira mensagem da fila
+        const message = queue.shift();
+        this.messageQueues.set(phone, queue);
+
+        if (!message) continue;
+
+        console.log(
+          `Processing message from queue for ${phone}: ${message.text} (Remaining: ${queue.length})`,
+        );
+
+        try {
+          const response = await this.gptService.generateResponse(
+            message.text,
+            phone,
+            message.imageUrl,
+          );
+
+          // Se a resposta for uma mensagem de erro, verifica cooldown
+          const isErrorMessage = response.includes('Aguarde um momento') || response.includes('problema temporário') || response.includes('dificuldades técnicas');
+
+          if (isErrorMessage) {
+            const lastError = this.lastErrorSent.get(phone) || 0;
+            const now = Date.now();
+            const errorCooldown = 30 * 1000; // 30 segundos
+
+            if (now - lastError < errorCooldown) {
+              console.log(
+                `Suppressing error message for ${phone} - cooldown active`,
+              );
+              continue;
+            }
+
+            this.lastErrorSent.set(phone, now);
+          }
+
+          await this.sendText({ phone, message: response });
+        } catch (error) {
+          console.error('Error generating GPT response for WhatsApp:', error);
+
+          // Verifica cooldown antes de enviar mensagem de erro genérica
+          const lastError = this.lastErrorSent.get(phone) || 0;
+          const now = Date.now();
+          const errorCooldown = 30 * 1000; // 30 segundos
+
+          if (now - lastError >= errorCooldown) {
+            await this.sendText({
+              phone,
+              message:
+                'Desculpe, tive um problema temporário. Aguarde alguns instantes antes de tentar novamente.',
+            });
+            this.lastErrorSent.set(phone, now);
+          }
+        }
+
+        // Pequeno delay entre mensagens para evitar sobrecarga
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      // Remove marca de processamento
+      this.processingQueues.delete(phone);
+
+      // Limpa fila vazia
+      const queue = this.messageQueues.get(phone) || [];
+      if (queue.length === 0) {
+        this.messageQueues.delete(phone);
+      }
+    }
+  }
+
   private async isAuthorizedPhone(phone: string): Promise<boolean> {
     const phoneNumber = this.tryParseChatId(phone);
     if (!phoneNumber) {
@@ -408,18 +492,23 @@ export class WhatsappService implements OnModuleInit {
         return { received: true, accountDeactivated: true };
       }
 
+      // Adiciona mensagem à fila
+      const queue = this.messageQueues.get(phone) || [];
+      queue.push({
+        text: textMessage || 'Analise esta imagem',
+        imageUrl
+      });
+      this.messageQueues.set(phone, queue);
+
       console.log(
-        `Received message from ${phone}: ${textMessage || '[Image]'} ${imageUrl ? `(Image: ${imageUrl})` : ''}`,
+        `Added message to queue for ${phone}: ${textMessage || '[Image]'} (Queue size: ${queue.length})`,
       );
-      try {
-        const response = await this.gptService.generateResponse(
-          textMessage || 'Analise esta imagem',
-          phone,
-          imageUrl,
-        );
-        await this.sendText({ phone, message: response });
-      } catch (error) {
-        console.error('Error generating GPT response for WhatsApp:', error);
+
+      // Inicia processamento da fila se não estiver processando
+      if (!this.processingQueues.get(phone)) {
+        this.processMessageQueue(phone).catch(err => {
+          console.error(`Error processing queue for ${phone}:`, err);
+        });
       }
     }
 
