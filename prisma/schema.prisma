@@ -45,6 +45,10 @@ model UserProfile {
   requestsToday                Int                  @default(0)
   passwordHash                 String?
   email                        String?
+  address                      String               @default("")
+  addressNumber                String?
+  addressComplement            String?
+  zipCode                      String               @default("")
   role                         Role                 @default(USER)
   waterReminderEnabled         Boolean              @default(false)
   waterReminderIntervalMinutes Int?
@@ -175,8 +179,8 @@ enum SubscriptionPlan {
   FREE
   PLUS
   PRO
-  PLUS_ANNUAL
-  PRO_ANNUAL
+  PLUS_ANUAL
+  PRO_ANUAL
 
   @@schema("aura")
 }

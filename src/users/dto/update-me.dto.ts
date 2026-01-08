@@ -12,6 +12,22 @@ export class UpdateMeDto {
   email?: string;
 
   @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  addressNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  addressComplement?: string;
+
+  @IsOptional()
+  @IsString()
+  zipCode?: string;
+
+  @IsOptional()
   @IsBoolean()
   waterReminderEnabled?: boolean;
 

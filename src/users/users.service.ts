@@ -47,6 +47,10 @@ export class UsersService {
       name: createUserDto.name,
       cpf: createUserDto.cpf ?? null,
       email: createUserDto.email ?? `${phoneNumber}@aura.local`,
+      address: createUserDto.address,
+      addressNumber: createUserDto.addressNumber,
+      addressComplement: createUserDto.addressComplement,
+      zipCode: createUserDto.zipCode,
       phoneNumber,
       subscriptionPlan: plan,
       ...(createUserDto.role ? { role: createUserDto.role } : {}),
@@ -173,6 +177,10 @@ export class UsersService {
         subscriptionExpiresAt: true,
         waterReminderEnabled: true,
         waterReminderIntervalMinutes: true,
+        address: true,
+        addressNumber: true,
+        addressComplement: true,
+        zipCode: true,
       },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');
@@ -304,6 +312,10 @@ export class UsersService {
     const data: any = {};
     if (dto.name) data.name = dto.name.trim();
     if (dto.email) data.email = dto.email.trim();
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.addressNumber !== undefined) data.addressNumber = dto.addressNumber;
+    if (dto.addressComplement !== undefined) data.addressComplement = dto.addressComplement;
+    if (dto.zipCode !== undefined) data.zipCode = dto.zipCode;
 
     // Water reminder settings
     if (dto.waterReminderEnabled !== undefined) {
@@ -327,6 +339,10 @@ export class UsersService {
         phoneNumber: true,
         name: true,
         email: true,
+        address: true,
+        addressNumber: true,
+        addressComplement: true,
+        zipCode: true,
         cpf: true,
         subscriptionPlan: true,
         waterReminderEnabled: true,

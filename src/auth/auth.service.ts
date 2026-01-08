@@ -44,8 +44,9 @@ export class AuthService {
   // AUTHENTICATION
   // ========================================
 
-  async register(email: string, password: string, name?: string, cpf?: string, phone?: string, _subscriptionPlan?: string) {
+  async register(email: string, password: string, name?: string, cpf?: string, phone?: string, subscriptionPlan?: string, address?: string, zipCode?: string, addressNumber?: string, addressComplement?: string) {
     if (!email || !password) throw new BadRequestException('E-mail e senha sao obrigatorios')
+    if (!zipCode) throw new BadRequestException('CEP e obrigatorio')
 
     const cleanCpf = (cpf || '').replace(/\D/g, '')
     const cleanPhone = (phone || '').replace(/\D/g, '')
@@ -84,6 +85,11 @@ export class AuthService {
         if (!existing.phoneNumber || !cleanPhone) {
           updateData.phoneNumber = cleanPhone || existing.phoneNumber;
         }
+        // Atualiza endereço se fornecido
+        if (address) updateData.address = address;
+        if (addressNumber) updateData.addressNumber = addressNumber;
+        if (addressComplement) updateData.addressComplement = addressComplement;
+        if (zipCode) updateData.zipCode = zipCode;
 
         const updated = await this.prisma.userProfile.update({
           where: { id: existing.id },
@@ -105,6 +111,10 @@ export class AuthService {
           cpf: cleanCpf || null,
           email,
           phoneNumber: cleanPhone || '',
+          address: address || '',
+          addressNumber: addressNumber || '',
+          addressComplement: addressComplement || '',
+          zipCode: zipCode,
           subscriptionPlan: SubscriptionPlan.FREE,
           subscriptionExpiresAt: trialExpiresAt,
           isPaymentActive: false,

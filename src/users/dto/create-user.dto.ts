@@ -16,6 +16,20 @@ export class CreateUserDto {
   email?: string;
 
   @IsString()
+  address: string;
+
+  @IsOptional()
+  @IsString()
+  addressNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  addressComplement?: string;
+
+  @IsString()
+  zipCode: string;
+
+  @IsString()
   @IsIn(['FREE', 'PLUS', 'PRO'])
   subscriptionPlan: SubscriptionPlan;
 

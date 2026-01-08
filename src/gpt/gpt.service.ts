@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { PrismaService } from '../prisma_connection/prisma.service';
+import { PrismaService } from '../prisma_connection/prisma.service.js';
 import { CreateGptDto } from './dto/create-gpt.dto';
 import { UpdateGptDto } from './dto/update-gpt.dto';
 import { UsersService } from '../users/users.service';
@@ -170,7 +170,15 @@ export class GptService {
             ) {
               console.log('AI Assistants: run status', currentRun.status);
               if (currentRun.status !== 'completed') {
-                throw new Error(`Assistant run ${currentRun.status}`);
+                const errorDetails = currentRun.last_error
+                  ? `${currentRun.last_error.code}: ${currentRun.last_error.message}`
+                  : 'No error details provided';
+                console.error(
+                  `AI Assistants: run failed with status ${currentRun.status}. Details: ${errorDetails}`,
+                );
+                throw new Error(
+                  `Assistant run ${currentRun.status}: ${errorDetails}`,
+                );
               }
               break;
             }

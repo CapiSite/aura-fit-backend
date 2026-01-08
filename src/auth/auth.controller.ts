@@ -12,9 +12,9 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() body: any) {
-    const { email, password, name, cpf, phone, subscriptionPlan } = body ?? {}
+    const { email, password, name, cpf, phone, subscriptionPlan, address, zipCode, addressNumber, addressComplement } = body ?? {}
     if (!email || !password) throw new BadRequestException('E-mail e senha sao obrigatorios')
-    return this.authService.register(email, password, name, cpf, phone, subscriptionPlan)
+    return this.authService.register(email, password, name, cpf, phone, subscriptionPlan, address, zipCode, addressNumber, addressComplement)
   }
 
   @Post('login')

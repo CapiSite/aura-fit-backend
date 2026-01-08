@@ -69,7 +69,7 @@ export class AsaasController {
             name: user.name,
             email: user.email ?? undefined,
             cpfCnpj: user.cpf ?? '',
-            postalCode: digits(dto.postalCode),
+            postalCode: digits(dto.postalCode) || digits(user.zipCode),
           },
     });
   }
@@ -108,10 +108,20 @@ export class AsaasController {
     });
 
     const paymentMethod = dto.paymentMethod ?? AsaasBillingType.CREDIT_CARD;
-    const digits = (value: string | undefined) => (value ? value.replace(/\\D/g, '') : '');
+    const digits = (value: string | undefined) => (value ? value.replace(/\D/g, '') : '');
     const month = digits(dto.creditCardExpiryMonth).padStart(2, '0').slice(0, 2);
     const yearRaw = digits(dto.creditCardExpiryYear).slice(-2);
     const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
+
+    const postalCode = digits(dto.postalCode) || digits(user.zipCode);
+    console.log(`[AsaasController] ChangePlan - User: ${user.id}, PostalCode (DB/ATO): ${postalCode} (Raw DB: ${user.zipCode})`);
+
+    if (!postalCode) {
+      throw new HttpException('CEP é obrigatório. Por favor, atualize seu cadastro ou informe o CEP.', HttpStatus.BAD_REQUEST);
+    }
+    if (postalCode.length < 8) {
+      throw new HttpException('CEP inválido. Verifique seus dados.', HttpStatus.BAD_REQUEST);
+    }
 
     return this.asaasService.createPlanChangePayment(user.id, dto.targetPlan, customer.id, {
       paymentMethod,
@@ -133,7 +143,9 @@ export class AsaasController {
             name: user.name,
             email: user.email ?? undefined,
             cpfCnpj: user.cpf ?? '',
-            postalCode: digits(dto.postalCode),
+            postalCode: postalCode,
+            addressNumber: user.addressNumber || (user.address ? (user.address.match(/\d+/)?.[0] ?? 'S/N') : 'S/N'),
+            addressComplement: user.addressComplement ?? undefined,
             mobilePhone: digits(user.phoneNumber),
             phone: digits(user.phoneNumber),
           },

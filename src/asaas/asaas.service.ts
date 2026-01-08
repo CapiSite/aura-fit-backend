@@ -56,6 +56,12 @@ export class AsaasService {
       payload.creditCardHolderInfo = dto.creditCardHolderInfo;
     }
 
+    // DEBUG: Log Asaas Payload
+    this.logger.debug(`[AsaasService] Sending Payload: ${JSON.stringify({
+      ...payload,
+      creditCard: payload.creditCard ? { ...payload.creditCard, number: '****', ccv: "***" } : undefined
+    }, null, 2)}`);
+
     return this.request<AsaasPayment>('/payments', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -136,11 +142,11 @@ export class AsaasService {
         value: 49.9,
         description: 'Plano Pro - 40 mensagens/dia e 5 fotos/dia',
       },
-      [SubscriptionPlan.PLUS_ANNUAL]: {
+      [SubscriptionPlan.PLUS_ANUAL]: {
         value: 287.0,
         description: 'Plano Plus Anual - 20 mensagens/dia e 2 fotos/dia (12 meses)',
       },
-      [SubscriptionPlan.PRO_ANNUAL]: {
+      [SubscriptionPlan.PRO_ANUAL]: {
         value: 479.0,
         description: 'Plano Pro Anual - 40 mensagens/dia e 5 fotos/dia (12 meses)',
       },
@@ -403,6 +409,11 @@ export class AsaasService {
       paidAt: null,
     });
 
+    const status = this.getPaymentStatus(payment);
+    if (['CONFIRMED', 'RECEIVED'].includes(status)) {
+      await this.applyConfirmedPayment(payment, status);
+    }
+
     return {
       payment,
       changeInfo: {
@@ -456,8 +467,8 @@ export class AsaasService {
 
     let planCode: SubscriptionPlan;
     if (planValue === 'PRO') planCode = SubscriptionPlan.PRO;
-    else if (planValue === 'PRO_ANNUAL') planCode = SubscriptionPlan.PRO_ANNUAL;
-    else if (planValue === 'PLUS_ANNUAL') planCode = SubscriptionPlan.PLUS_ANNUAL;
+    else if (planValue === 'PRO_ANUAL' || planValue === 'PRO_ANUAL') planCode = SubscriptionPlan.PRO_ANUAL;
+    else if (planValue === 'PLUS_ANUAL' || planValue === 'PLUS_ANUAL') planCode = SubscriptionPlan.PLUS_ANUAL;
     else planCode = SubscriptionPlan.PLUS;
 
     const chatId = chatIdFromExt ?? '';
@@ -489,8 +500,8 @@ export class AsaasService {
   private getPlanAmount(planCode: SubscriptionPlan): number {
     if (planCode === SubscriptionPlan.FREE) return 0;
     if (planCode === SubscriptionPlan.PRO) return 49.9;
-    if (planCode === SubscriptionPlan.PRO_ANNUAL) return 479.0;
-    if (planCode === SubscriptionPlan.PLUS_ANNUAL) return 287.0;
+    if (planCode === SubscriptionPlan.PRO_ANUAL) return 479.0;
+    if (planCode === SubscriptionPlan.PLUS_ANUAL) return 287.0;
     return 29.9;
   }
 
@@ -563,11 +574,11 @@ export class AsaasService {
     }
 
     // UPGRADE: Iniciar NOVO ciclo subtraindo crédito dos dias não utilizados
-    const isCurrentAnnual = currentPlan.includes('ANNUAL');
+    const isCurrentAnnual = currentPlan.includes('ANUAL');
     const totalDays = isCurrentAnnual ? 365 : 30;
     const currentRemainingValue = (daysRemaining / totalDays) * currentValue;
 
-    const isTargetAnnual = targetPlan.includes('ANNUAL');
+    const isTargetAnnual = targetPlan.includes('ANUAL');
     const targetFullValue = targetValue; // Novo ciclo completo
 
     // Preço é o valor cheio do novo plano MENOS o crédito do plano atual
@@ -583,7 +594,7 @@ export class AsaasService {
 
   private isAnnualUpgrade(current: SubscriptionPlan, target: SubscriptionPlan): boolean {
     const monthlyPlans: SubscriptionPlan[] = [SubscriptionPlan.PLUS, SubscriptionPlan.PRO];
-    const annualPlans: SubscriptionPlan[] = [SubscriptionPlan.PLUS_ANNUAL, SubscriptionPlan.PRO_ANNUAL];
+    const annualPlans: SubscriptionPlan[] = [SubscriptionPlan.PLUS_ANUAL, SubscriptionPlan.PRO_ANUAL];
     return monthlyPlans.includes(current) && annualPlans.includes(target);
   }
 
@@ -752,7 +763,7 @@ export class AsaasService {
     );
 
     const expiresAt = new Date(paidAt);
-    const isAnnualPlan = finalPlan === SubscriptionPlan.PLUS_ANNUAL || finalPlan === SubscriptionPlan.PRO_ANNUAL;
+    const isAnnualPlan = finalPlan === SubscriptionPlan.PLUS_ANUAL || finalPlan === SubscriptionPlan.PRO_ANUAL;
     expiresAt.setDate(expiresAt.getDate() + (isAnnualPlan ? 365 : 30));
 
     await this.prisma.userProfile.update({
