@@ -427,6 +427,14 @@ export class UsersService {
         this.prisma.promptUsage.deleteMany({
           where: { userId: user.id },
         }),
+        // Deleta tokens de reativacao
+        this.prisma.reactivationToken.deleteMany({
+          where: { userId: user.id },
+        }),
+        // Deleta tokens de reset de senha
+        this.prisma.passwordResetToken.deleteMany({
+          where: { userId: user.id },
+        }),
         // Deleta os pagamentos
         this.prisma.payment.deleteMany({
           where: { userId: user.id },
