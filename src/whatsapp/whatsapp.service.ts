@@ -537,7 +537,7 @@ export class WhatsappService implements OnModuleInit {
               console.error(`Error processing queue for ${phone}:`, err);
             });
           }
-        }, 2000);
+        }, 1000);
 
         this.messageTimers.set(phone, timer);
       }
