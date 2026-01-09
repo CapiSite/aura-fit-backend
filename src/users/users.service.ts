@@ -181,6 +181,12 @@ export class UsersService {
         addressNumber: true,
         addressComplement: true,
         zipCode: true,
+        // Subscription fields
+        asaasSubscriptionId: true,
+        asaasCustomerId: true,
+        subscriptionStatus: true,
+        subscriptionCycle: true,
+        pendingPlan: true,
       },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');

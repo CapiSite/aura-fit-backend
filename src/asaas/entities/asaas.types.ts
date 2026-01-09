@@ -39,6 +39,7 @@ export type AsaasPayment = {
   object?: string;
   id: string;
   customer: string;
+  subscription?: string; // ID da assinatura se pertencer a uma
   billingType: string;
   value: number;
   netValue?: number;
@@ -68,13 +69,27 @@ export type AsaasWebhookPayload = {
 
 export type CreditCardHolderInfoPayload = {
   name: string;
-  email: string;
+  email?: string;
   cpfCnpj: string;
-  postalCode: string;
+  postalCode?: string;
   addressNumber?: string;
   addressComplement?: string;
   phone?: string;
   mobilePhone?: string;
+};
+
+export type AsaasSubscription = {
+  id: string;
+  customer: string;
+  billingType: string;
+  value: number;
+  nextDueDate: string;
+  cycle: 'MONTHLY' | 'YEARLY';
+  status: 'ACTIVE' | 'INACTIVE' | 'EXPIRED';
+  description?: string;
+  externalReference?: string;
+  dateCreated?: string;
+  deleted?: boolean;
 };
 
 export type CreditCardPayload = {
