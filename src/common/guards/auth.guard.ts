@@ -36,7 +36,7 @@ export class AuthGuard implements CanActivate {
     const user = await this.prisma.userProfile.findUnique({ where: { cpf: payload.cpf } });
     if (!user) throw new UnauthorizedException('Usuário não encontrado');
 
-    req['user'] = { cpf: payload.cpf, role: payload.role ?? 'USER' };
+    req['user'] = { cpf: payload.cpf, role: user.role };
     return true;
   }
 }

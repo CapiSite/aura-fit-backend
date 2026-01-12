@@ -68,8 +68,33 @@ export class AsaasSubscriptionService {
     }
 
     // Pro-rata upgrade
-    const currentDailyRate = currentPrice / 30; // Simplificado
-    const targetDailyRate = targetPrice / 30;
+    const isCurrentAnnual = currentPlan.includes('ANUAL');
+    const isTargetAnnual = targetPlan.includes('ANUAL');
+
+    // Case 1: Monthly -> Annual (Upsell / Cycle Change)
+    // User is buying a FULL YEAR. We deduct the UNUSED value of the current month as credit.
+    if (!isCurrentAnnual && isTargetAnnual) {
+      const currentDaily = currentPrice / 30;
+      const credit = currentDaily * daysRemaining;
+
+      let upgradePrice = targetPrice - credit;
+      if (upgradePrice < 0) upgradePrice = 0;
+
+      return {
+        canChange: true,
+        changePrice: Number(upgradePrice.toFixed(2)),
+        daysRemaining: 365, // User is buying a full year
+        isDowngrade: false,
+      };
+    }
+
+    // Unify divisor logic for Case 2 (Same Cycle: Monthly->Monthly or Annual->Annual)
+    const currentDivisor = isCurrentAnnual ? 365 : 30;
+    const targetDivisor = isTargetAnnual ? 365 : 30;
+
+    const currentDailyRate = currentPrice / currentDivisor;
+    const targetDailyRate = targetPrice / targetDivisor;
+
     const diffDailyRate = targetDailyRate - currentDailyRate;
     let upgradePrice = diffDailyRate * daysRemaining;
 
@@ -117,12 +142,14 @@ export class AsaasSubscriptionService {
     const billingType = opts.billingType ?? AsaasBillingType.CREDIT_CARD;
     const nextDueDate = opts.nextDueDate ?? new Date().toISOString().slice(0, 10);
 
+    // Validation removed: Asaas validation is sufficient, and existing customers might not need card data sent again if already tokenized.
+    /*
     if (billingType !== AsaasBillingType.PIX) {
-      // Basic validation handled by DTOs in Controller usually, but good to have here
       if (!opts.creditCard || !opts.holderInfo) {
         throw new HttpException('Dados do cartão obrigatórios', HttpStatus.BAD_REQUEST);
       }
     }
+    */
 
     const payload: any = {
       customer: customerId,
@@ -460,16 +487,32 @@ export class AsaasSubscriptionService {
     const expiresAt = new Date(paidAt);
     const isAnnualPlan =
       finalPlan === SubscriptionPlan.PLUS_ANUAL || finalPlan === SubscriptionPlan.PRO_ANUAL;
-    expiresAt.setDate(expiresAt.getDate() + (isAnnualPlan ? 365 : 30));
 
-    let newSubscriptionExpiresAt = expiresAt;
+    // Calcula data padrão de novo ciclo a partir do pagamento
+    const standardNewExpiresAt = new Date(paidAt);
+    standardNewExpiresAt.setDate(standardNewExpiresAt.getDate() + (isAnnualPlan ? 365 : 30));
 
+    let newSubscriptionExpiresAt = standardNewExpiresAt;
+
+    // Tratamento especial para Upgrades
     if (isUpgrade && profile.subscriptionExpiresAt) {
-      newSubscriptionExpiresAt = profile.subscriptionExpiresAt;
+      const isCurrentAnnual = profile.subscriptionPlan.includes('ANUAL');
+      const isTargetAnnual = finalPlan.includes('ANUAL');
 
-      // Se estava expirada, aí sim renova?
-      if (newSubscriptionExpiresAt < new Date()) {
-        newSubscriptionExpiresAt = expiresAt; // Começa ciclo novo completo
+      // Case: Monthly -> Annual 
+      // Se mudou de Mensal para Anual, o user "comprou" um ano cheio (menos crédito).
+      // A validade deve ser Full Cycle (365 dias) a partir do pagamento.
+      if (!isCurrentAnnual && isTargetAnnual) {
+        newSubscriptionExpiresAt = standardNewExpiresAt;
+      } else {
+        // Case: Monthly -> Monthly --OU-- Annual -> Annual (Pro-rata simples)
+        // Mantém a data de expiração original (apenas "pagou a diferença" do ciclo atual)
+        newSubscriptionExpiresAt = profile.subscriptionExpiresAt;
+
+        // Se estava expirada, renova
+        if (newSubscriptionExpiresAt < new Date()) {
+          newSubscriptionExpiresAt = standardNewExpiresAt;
+        }
       }
     }
 
