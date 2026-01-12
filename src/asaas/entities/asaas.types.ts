@@ -1,14 +1,3 @@
-export type AsaasEnvironment = 'production' | 'sandbox';
-
-export type AsaasError = {
-  code?: string;
-  description?: string;
-};
-
-export type AsaasResponseMeta = {
-  object?: string;
-};
-
 export type AsaasCustomer = {
   id: string;
   name: string;
@@ -31,6 +20,7 @@ export type AsaasPaymentStatus =
   | 'CONFIRMED'
   | 'OVERDUE'
   | 'REFUNDED'
+  | 'RECEIVED_IN_CASH'
   | 'RECEIVED_IN_CASH_UNDONE'
   | 'CHARGED_BACK'
   | 'CANCELLED';

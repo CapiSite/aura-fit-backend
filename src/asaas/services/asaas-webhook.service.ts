@@ -44,7 +44,7 @@ export class AsaasWebhookService {
     if (!payment) return { ok: false };
 
     const status = this.paymentService.getPaymentStatus(payment);
-    if (!['CONFIRMED', 'RECEIVED'].includes(status)) {
+    if (!['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status)) {
       return { ok: true, ignored: true };
     }
 
@@ -58,24 +58,39 @@ export class AsaasWebhookService {
       });
 
       if (user) {
-        const cycle = user.subscriptionCycle || 'MONTHLY';
         const paidAt = this.paymentService.resolvePaidAt(payment);
-        const newExpiresAt = new Date(paidAt);
 
-        if (cycle === 'YEARLY') {
-          newExpiresAt.setFullYear(newExpiresAt.getFullYear() + 1);
-        } else {
-          newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
+        // Sincronizar datas com Asaas (source of truth)
+        try {
+          await this.subscriptionService.syncSubscriptionFromAsaas(payment.subscription);
+        } catch (error) {
+          this.logger.error(`Falha ao sincronizar subscription do Asaas: ${error}`);
+          // Fallback: calcular localmente apenas se sync falhar
+          const cycle = user.subscriptionCycle || 'MONTHLY';
+          const newExpiresAt = new Date(paidAt);
+
+          if (cycle === 'YEARLY') {
+            newExpiresAt.setFullYear(newExpiresAt.getFullYear() + 1);
+          } else {
+            newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
+          }
+
+          await this.prisma.userProfile.update({
+            where: { id: user.id },
+            data: {
+              subscriptionExpiresAt: newExpiresAt,
+              nextBillingAt: newExpiresAt,
+            },
+          });
         }
 
+        // Atualizar status de pagamento
         await this.prisma.userProfile.update({
           where: { id: user.id },
           data: {
             isPaymentActive: true,
             subscriptionStatus: 'ACTIVE',
             lastPaymentAt: paidAt,
-            subscriptionExpiresAt: newExpiresAt,
-            nextBillingAt: newExpiresAt,
           },
         });
 

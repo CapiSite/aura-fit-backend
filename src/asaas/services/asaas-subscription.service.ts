@@ -34,24 +34,97 @@ export class AsaasSubscriptionService {
     return pricing[planCode] || 0;
   }
 
-  calculatePlanChange(
+  private parseAsaasDate(value: string): Date {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]) - 1;
+      const day = Number(match[3]);
+      return new Date(Date.UTC(year, month, day));
+    }
+    return new Date(value);
+  }
+
+  /**
+   * Busca subscription do Asaas (source of truth para nextDueDate)
+   */
+  async getSubscription(asaasSubscriptionId: string): Promise<AsaasSubscription> {
+    try {
+      return await this.apiClient.request<AsaasSubscription>(
+        `/subscriptions/${asaasSubscriptionId}`,
+        { method: 'GET' },
+      );
+    } catch (error) {
+      this.logger.error(`Falha ao buscar subscription ${asaasSubscriptionId}`, error);
+      throw new HttpException(
+        'Não foi possível consultar a assinatura',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+  }
+
+  /**
+   * Sincroniza data de expiração local com o nextDueDate do Asaas
+   */
+  async syncSubscriptionFromAsaas(asaasSubscriptionId: string): Promise<void> {
+    const sub = await this.getSubscription(asaasSubscriptionId);
+    const nextDueDate = this.parseAsaasDate(sub.nextDueDate);
+
+    await this.prisma.userProfile.update({
+      where: { asaasSubscriptionId },
+      data: {
+        subscriptionExpiresAt: nextDueDate,
+        nextBillingAt: nextDueDate,
+      },
+    });
+
+    this.logger.log(`Datas sincronizadas com Asaas. NextDueDate: ${sub.nextDueDate}`);
+  }
+
+
+  async calculatePlanChange(
     currentPlan: SubscriptionPlan,
     targetPlan: SubscriptionPlan,
-    currentExpiresAt: Date,
-  ): {
+    asaasSubscriptionId: string | null,
+  ): Promise<{
     canChange: boolean;
     changePrice: number;
     daysRemaining: number;
     reason?: string;
     isDowngrade?: boolean;
-  } {
+    nextDueDate?: string;
+  }> {
     const currentPrice = this.getPlanAmount(currentPlan);
     const targetPrice = this.getPlanAmount(targetPlan);
     const now = new Date();
-    const expires = new Date(currentExpiresAt);
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    // Buscar nextDueDate do Asaas (source of truth) - SEM FALLBACK
+    if (!asaasSubscriptionId) {
+      throw new HttpException(
+        'Assinatura não encontrada. Contate o suporte.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const sub = await this.getSubscription(asaasSubscriptionId);
+    let expires = this.parseAsaasDate(sub.nextDueDate);
+    const upcomingPayment = await this.paymentService.getUpcomingPaymentBySubscription(
+      asaasSubscriptionId,
+    );
+    if (upcomingPayment?.dueDate) {
+      const dueDate = this.parseAsaasDate(upcomingPayment.dueDate);
+      if (dueDate.getTime() > todayUtc.getTime() && dueDate.getTime() < expires.getTime()) {
+        expires = dueDate;
+        this.logger.debug(`Using Asaas upcoming payment dueDate: ${upcomingPayment.dueDate}`);
+      }
+    }
+    this.logger.debug(`Using Asaas nextDueDate: ${sub.nextDueDate}`);
+
+    const nextDueDate = expires.toISOString().slice(0, 10);
 
     if (expires <= now) {
-      return { canChange: true, changePrice: targetPrice, daysRemaining: 30 };
+      return { canChange: true, changePrice: targetPrice, daysRemaining: 0, nextDueDate };
     }
 
     const diffTime = Math.abs(expires.getTime() - now.getTime());
@@ -64,6 +137,7 @@ export class AsaasSubscriptionService {
         changePrice: 0,
         daysRemaining,
         isDowngrade: true,
+        nextDueDate,
       };
     }
 
@@ -71,11 +145,54 @@ export class AsaasSubscriptionService {
     const isCurrentAnnual = currentPlan.includes('ANUAL');
     const isTargetAnnual = targetPlan.includes('ANUAL');
 
+    // Calcular inicio do ciclo pelo nextDueDate
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const cycleEnd = expires;
+
+    const computeCycleStart = (end: Date, annual: boolean): Date => {
+      const endYear = end.getUTCFullYear();
+      const endMonth = end.getUTCMonth();
+      const endDay = end.getUTCDate();
+
+      if (annual) {
+        const targetYear = endYear - 1;
+        const lastDay = new Date(Date.UTC(targetYear, endMonth + 1, 0)).getUTCDate();
+        return new Date(Date.UTC(targetYear, endMonth, Math.min(endDay, lastDay)));
+      }
+
+      let targetYear = endYear;
+      let targetMonth = endMonth - 1;
+      if (targetMonth < 0) {
+        targetMonth = 11;
+        targetYear -= 1;
+      }
+
+      const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+      return new Date(Date.UTC(targetYear, targetMonth, Math.min(endDay, lastDay)));
+    };
+
+    const cycleStart = computeCycleStart(cycleEnd, isCurrentAnnual);
+
+    // Calcular dias REAIS do ciclo atual (ex: 28, 30, 31 ou 365)
+    const totalCycleDays = Math.max(
+      1,
+      Math.ceil((cycleEnd.getTime() - cycleStart.getTime()) / msPerDay)
+    );
+
+    this.logger.debug(`Cycle real: ${totalCycleDays} dias (${cycleStart.toISOString().slice(0, 10)} -> ${cycleEnd.toISOString().slice(0, 10)})`);
+
     // Case 1: Monthly -> Annual (Upsell / Cycle Change)
     // User is buying a FULL YEAR. We deduct the UNUSED value of the current month as credit.
     if (!isCurrentAnnual && isTargetAnnual) {
-      const currentDaily = currentPrice / 30;
+      const currentDaily = currentPrice / totalCycleDays; // Usa ciclo REAL
       const credit = currentDaily * daysRemaining;
+
+      const annualEnd = new Date(now);
+      annualEnd.setFullYear(annualEnd.getFullYear() + 1);
+      const annualDays = Math.max(
+        1,
+        Math.ceil((annualEnd.getTime() - now.getTime()) / msPerDay),
+      );
 
       let upgradePrice = targetPrice - credit;
       if (upgradePrice < 0) upgradePrice = 0;
@@ -83,17 +200,16 @@ export class AsaasSubscriptionService {
       return {
         canChange: true,
         changePrice: Number(upgradePrice.toFixed(2)),
-        daysRemaining: 365, // User is buying a full year
+        daysRemaining: annualDays,
         isDowngrade: false,
+        nextDueDate,
       };
     }
 
-    // Unify divisor logic for Case 2 (Same Cycle: Monthly->Monthly or Annual->Annual)
-    const currentDivisor = isCurrentAnnual ? 365 : 30;
-    const targetDivisor = isTargetAnnual ? 365 : 30;
-
-    const currentDailyRate = currentPrice / currentDivisor;
-    const targetDailyRate = targetPrice / targetDivisor;
+    // Case 2 (Same Cycle: Monthly->Monthly or Annual->Annual)
+    // Calcular valor diário baseado no ciclo real de cada plano
+    const currentDailyRate = currentPrice / totalCycleDays;
+    const targetDailyRate = targetPrice / totalCycleDays;
 
     const diffDailyRate = targetDailyRate - currentDailyRate;
     let upgradePrice = diffDailyRate * daysRemaining;
@@ -105,17 +221,36 @@ export class AsaasSubscriptionService {
       changePrice: Number(upgradePrice.toFixed(2)),
       daysRemaining,
       isDowngrade: false,
+      nextDueDate,
     };
   }
 
-  private calculateExpiresAt(cycle: string): Date {
-    const expiresAt = new Date();
-    if (cycle === 'YEARLY') {
-      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-    } else {
-      expiresAt.setMonth(expiresAt.getMonth() + 1);
+  async getPixForSubscription(
+    asaasSubscriptionId: string,
+    opts?: { attempts?: number; delayMs?: number },
+  ): Promise<{
+    payment: AsaasPayment | null;
+    pix: { encodedImage: string; payload: string; expirationDate: string } | null;
+  }> {
+    const attempts = Math.max(1, opts?.attempts ?? 3);
+    const delayMs = Math.max(0, opts?.delayMs ?? 1000);
+
+    let payment: AsaasPayment | null = null;
+    let pix: { encodedImage: string; payload: string; expirationDate: string } | null = null;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      payment = await this.paymentService.getPaymentBySubscription(asaasSubscriptionId);
+      if (payment?.id) {
+        pix = await this.paymentService.getPixQrCode(payment.id);
+        if (pix) break;
+      }
+
+      if (attempt < attempts - 1 && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
-    return expiresAt;
+
+    return { payment, pix };
   }
 
   async createSubscription(
@@ -128,7 +263,12 @@ export class AsaasSubscriptionService {
       chatId?: string;
       nextDueDate?: string;
     },
-  ): Promise<AsaasSubscription> {
+  ): Promise<
+    AsaasSubscription & {
+      payment?: AsaasPayment | null;
+      pix?: { encodedImage: string; payload: string; expirationDate: string } | null;
+    }
+  > {
     if (planCode === SubscriptionPlan.FREE) {
       this.logger.warn(`Attempt to create FREE subscription blocked`);
       throw new HttpException(
@@ -142,14 +282,6 @@ export class AsaasSubscriptionService {
     const billingType = opts.billingType ?? AsaasBillingType.CREDIT_CARD;
     const nextDueDate = opts.nextDueDate ?? new Date().toISOString().slice(0, 10);
 
-    // Validation removed: Asaas validation is sufficient, and existing customers might not need card data sent again if already tokenized.
-    /*
-    if (billingType !== AsaasBillingType.PIX) {
-      if (!opts.creditCard || !opts.holderInfo) {
-        throw new HttpException('Dados do cartão obrigatórios', HttpStatus.BAD_REQUEST);
-      }
-    }
-    */
 
     const payload: any = {
       customer: customerId,
@@ -180,8 +312,18 @@ export class AsaasSubscriptionService {
       body: JSON.stringify(payload),
     });
 
+    let payment: AsaasPayment | null | undefined;
+    let pix: { encodedImage: string; payload: string; expirationDate: string } | null | undefined;
+    if (billingType === AsaasBillingType.PIX) {
+      const pixResult = await this.getPixForSubscription(subscription.id);
+      payment = pixResult.payment;
+      pix = pixResult.pix;
+    }
+
     if (opts.chatId) {
-      const expiresAt = this.calculateExpiresAt(cycle);
+      const nextDueDateParsed = this.parseAsaasDate(subscription.nextDueDate);
+
+      // Atualizar outros campos do perfil antes do sync (garante asaasSubscriptionId)
       await this.prisma.userProfile.update({
         where: { phoneNumber: String(opts.chatId) },
         data: {
@@ -192,14 +334,28 @@ export class AsaasSubscriptionService {
           subscriptionPlan: planCode,
           isPaymentActive: true,
           lastPaymentAt: new Date(),
-          subscriptionExpiresAt: expiresAt,
-          nextBillingAt: expiresAt,
+          subscriptionExpiresAt: nextDueDateParsed,
+          nextBillingAt: nextDueDateParsed,
           pendingPlan: null,
         },
       });
+
+      // Sincronizar datas com Asaas (source of truth)
+      try {
+        await this.syncSubscriptionFromAsaas(subscription.id);
+      } catch (error) {
+        this.logger.warn(
+          `Falha ao sincronizar datas da subscription ${subscription.id} após criação.`,
+          error,
+        );
+      }
     }
 
-    return subscription;
+    return {
+      ...subscription,
+      payment,
+      pix,
+    };
   }
 
   async cancelSubscription(
@@ -254,7 +410,11 @@ export class AsaasSubscriptionService {
       holderInfo?: CreditCardHolderInfoPayload;
       chatId?: string;
     },
-  ): Promise<{ payment?: AsaasPayment; changeInfo: any }> {
+  ): Promise<{
+    payment?: AsaasPayment;
+    changeInfo: any;
+    pix?: { encodedImage: string; payload: string; expirationDate: string } | null;
+  }> {
     if (targetPlan === SubscriptionPlan.FREE) {
       throw new HttpException(
         'Não é possível fazer downgrade para plano FREE',
@@ -283,10 +443,10 @@ export class AsaasSubscriptionService {
       throw new HttpException('Assinatura expirada', HttpStatus.BAD_REQUEST);
     }
 
-    const planChange = this.calculatePlanChange(
+    const planChange = await this.calculatePlanChange(
       user.subscriptionPlan,
       targetPlan,
-      user.subscriptionExpiresAt,
+      user.asaasSubscriptionId,
     );
 
     if (!planChange.canChange) {
@@ -332,6 +492,7 @@ export class AsaasSubscriptionService {
     }
 
     let payment: AsaasPayment | undefined;
+    let pix: { encodedImage: string; payload: string; expirationDate: string } | null | undefined;
 
     if (planChange.changePrice >= PLAN_CHANGE_CONFIG.FREE_UPGRADE_THRESHOLD) {
       const billingType = opts.paymentMethod ?? AsaasBillingType.CREDIT_CARD;
@@ -350,34 +511,37 @@ export class AsaasSubscriptionService {
 
       payment = await this.paymentService.createPayment(payload);
 
-      await this.paymentService.upsertPaymentRecord({
-        payment,
-        status: this.paymentService.getPaymentStatus(payment),
-        plan: targetPlan,
-        chatId: opts.chatId || '',
-        paidAt: null,
-      });
+      if (billingType === AsaasBillingType.PIX) {
+        pix = await this.paymentService.getPixQrCode(payment.id);
+      }
 
       const status = this.paymentService.getPaymentStatus(payment);
-      if (!['CONFIRMED', 'RECEIVED'].includes(status)) {
-        if (['CONFIRMED', 'RECEIVED'].includes(status)) {
-          await this.applyConfirmedPayment(payment, status);
-        } else {
+        const paidAt = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status)
+          ? this.paymentService.resolvePaidAt(payment)
+          : null;
+
+      await this.paymentService.upsertPaymentRecord({
+        payment,
+        status,
+        plan: targetPlan,
+        chatId: opts.chatId || '',
+        paidAt,
+      });
+
+        if (!['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status)) {
           return {
             payment,
-            changeInfo: {
-              changed: false,
-              scheduled: false,
-              waitingPayment: true,
-              isDowngrade: false,
-              charged: true,
-              upgradePrice: planChange.changePrice,
-              daysRemaining: planChange.daysRemaining,
-            },
-          };
-        }
-      } else {
-        await this.applyConfirmedPayment(payment, status);
+            pix,
+          changeInfo: {
+            changed: false,
+            scheduled: false,
+            waitingPayment: true,
+            isDowngrade: false,
+            charged: true,
+            upgradePrice: planChange.changePrice,
+            daysRemaining: planChange.daysRemaining,
+          },
+        };
       }
     }
 
@@ -400,6 +564,7 @@ export class AsaasSubscriptionService {
 
     return {
       payment,
+      pix,
       changeInfo: {
         changed: true,
         scheduled: false,
@@ -455,7 +620,7 @@ export class AsaasSubscriptionService {
     }
 
     const finalPlan = isUpgrade ? planCode : (profile.pendingPlan || planCode);
-    if (isUpgrade && profile.asaasSubscriptionId && profile.asaasCustomerId) {
+      if (isUpgrade && profile.asaasSubscriptionId && profile.asaasCustomerId) {
       if (profile.subscriptionPlan !== finalPlan) {
         this.logger.log(`Pagamento de Upgrade confirmado via Webhook/Async. Trocando assinatura no Asaas...`);
         try {
@@ -476,6 +641,23 @@ export class AsaasSubscriptionService {
           });
 
           this.logger.log(`Upgrade no Asaas concluído com sucesso. Nova Sub: ${newSub.id}`);
+
+          // 🆕 Sincronizar datas com o Asaas (source of truth)
+          await this.syncSubscriptionFromAsaas(newSub.id);
+
+          // Atualizar asaasSubscriptionId no perfil com a nova subscription
+          await this.prisma.userProfile.update({
+            where: { phoneNumber: String(chatId) },
+            data: {
+              asaasSubscriptionId: newSub.id,
+              subscriptionPlan: finalPlan,
+              isPaymentActive: true,
+              lastPaymentAt: paidAt,
+              pendingPlan: null,
+            },
+          });
+
+          return true; // Early return - datas já sincronizadas
         } catch (err) {
           this.logger.error(`Erro ao trocar assinatura no Asaas após pagamento de upgrade: ${err}`);
           // Não retornamos false para não travar o webhook, mas logamos erro crítico
@@ -483,33 +665,32 @@ export class AsaasSubscriptionService {
       }
     }
 
-    // Atualizar perfil local
-    const expiresAt = new Date(paidAt);
+    // Fallback: Calcular data localmente (usado quando não há subscription no Asaas)
     const isAnnualPlan =
       finalPlan === SubscriptionPlan.PLUS_ANUAL || finalPlan === SubscriptionPlan.PRO_ANUAL;
 
-    // Calcula data padrão de novo ciclo a partir do pagamento
     const standardNewExpiresAt = new Date(paidAt);
-    standardNewExpiresAt.setDate(standardNewExpiresAt.getDate() + (isAnnualPlan ? 365 : 30));
+
+    // Usar calendário nativo (respeita 28/29/30/31 dias automaticamente)
+    if (isAnnualPlan) {
+      standardNewExpiresAt.setFullYear(standardNewExpiresAt.getFullYear() + 1);
+    } else {
+      standardNewExpiresAt.setMonth(standardNewExpiresAt.getMonth() + 1);
+    }
 
     let newSubscriptionExpiresAt = standardNewExpiresAt;
 
-    // Tratamento especial para Upgrades
     if (isUpgrade && profile.subscriptionExpiresAt) {
       const isCurrentAnnual = profile.subscriptionPlan.includes('ANUAL');
       const isTargetAnnual = finalPlan.includes('ANUAL');
 
-      // Case: Monthly -> Annual 
-      // Se mudou de Mensal para Anual, o user "comprou" um ano cheio (menos crédito).
-      // A validade deve ser Full Cycle (365 dias) a partir do pagamento.
       if (!isCurrentAnnual && isTargetAnnual) {
+        // Monthly -> Annual: novo ciclo completo
         newSubscriptionExpiresAt = standardNewExpiresAt;
       } else {
-        // Case: Monthly -> Monthly --OU-- Annual -> Annual (Pro-rata simples)
-        // Mantém a data de expiração original (apenas "pagou a diferença" do ciclo atual)
+        // Mesmo ciclo: mantém data original
         newSubscriptionExpiresAt = profile.subscriptionExpiresAt;
 
-        // Se estava expirada, renova
         if (newSubscriptionExpiresAt < new Date()) {
           newSubscriptionExpiresAt = standardNewExpiresAt;
         }

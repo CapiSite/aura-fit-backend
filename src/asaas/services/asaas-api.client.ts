@@ -57,7 +57,7 @@ export class AsaasApiClient {
         'Erro ao comunicar com o Asaas';
 
       this.logger.error(
-        `Asaas error ${response.status}: ${description}`,
+        `Asaas error ${response.status} on ${path}: ${description}`,
         text,
       );
 

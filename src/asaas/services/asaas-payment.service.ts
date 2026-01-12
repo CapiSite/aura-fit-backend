@@ -30,6 +30,17 @@ export class AsaasPaymentService {
     private readonly prisma: PrismaService,
   ) { }
 
+  private parseAsaasDate(value: string): Date {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]) - 1;
+      const day = Number(match[3]);
+      return new Date(Date.UTC(year, month, day));
+    }
+    return new Date(value);
+  }
+
   async createPayment(dto: CreatePaymentInput): Promise<AsaasPayment> {
     const billingType = dto.billingType ?? AsaasBillingType.CREDIT_CARD;
 
@@ -79,6 +90,54 @@ export class AsaasPaymentService {
     return this.apiClient.request<AsaasPayment>(`/payments/${id}`, { method: 'GET' });
   }
 
+  async getPaymentBySubscription(subscriptionId: string): Promise<AsaasPayment | null> {
+    const result = await this.apiClient.request<{
+      data?: AsaasPayment[];
+      payments?: AsaasPayment[];
+    }>(`/payments?subscription=${subscriptionId}&limit=1`, { method: 'GET' });
+
+    const list = result?.data ?? result?.payments ?? [];
+    return list[0] ?? null;
+  }
+
+  async getUpcomingPaymentBySubscription(subscriptionId: string): Promise<AsaasPayment | null> {
+    const result = await this.apiClient.request<{
+      data?: AsaasPayment[];
+      payments?: AsaasPayment[];
+    }>(`/payments?subscription=${subscriptionId}&limit=20`, { method: 'GET' });
+
+    const list = (result?.data ?? result?.payments ?? []).filter(Boolean);
+    if (!list.length) return null;
+
+    const ignoredStatuses = new Set([
+      'CANCELLED',
+      'REFUNDED',
+      'CHARGED_BACK',
+      'RECEIVED_IN_CASH_UNDONE',
+    ]);
+    const candidates = list.filter((payment) => !ignoredStatuses.has(payment.status));
+    const pool = candidates.length ? candidates : list;
+
+    const now = new Date();
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    let upcoming: AsaasPayment | null = null;
+    let latest: AsaasPayment | null = null;
+
+    for (const payment of pool) {
+      const due = this.parseAsaasDate(payment.dueDate);
+      if (!latest || due.getTime() > this.parseAsaasDate(latest.dueDate).getTime()) {
+        latest = payment;
+      }
+      if (due.getTime() > todayUtc.getTime()) {
+        if (!upcoming || due.getTime() < this.parseAsaasDate(upcoming.dueDate).getTime()) {
+          upcoming = payment;
+        }
+      }
+    }
+
+    return upcoming ?? latest;
+  }
+
   async getPixQrCode(
     id: string,
   ): Promise<{ encodedImage: string; payload: string; expirationDate: string } | null> {
@@ -98,8 +157,25 @@ export class AsaasPaymentService {
     return (payment?.status ?? '').toString().toUpperCase();
   }
 
+  private parsePaymentDate(value?: string): Date | null {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
   resolvePaidAt(payment: AsaasPayment): Date {
-    return new Date();
+    const paidAt =
+      this.parsePaymentDate(payment.confirmedDate) ??
+      this.parsePaymentDate(payment.paymentDate) ??
+      this.parsePaymentDate(payment.clientPaymentDate);
+
+    if (paidAt) return paidAt;
+
+    const dueDate = this.parsePaymentDate(payment.dueDate);
+    const now = new Date();
+    if (dueDate && dueDate <= now) return dueDate;
+
+    return now;
   }
 
   async upsertPaymentRecord(data: {
@@ -172,9 +248,9 @@ export class AsaasPaymentService {
 
     let planCode: SubscriptionPlan;
     if (planValue === 'PRO') planCode = SubscriptionPlan.PRO;
-    else if (planValue === 'PRO_ANUAL' || planValue === 'PRO_ANUAL')
+    else if (planValue === 'PRO_ANUAL')
       planCode = SubscriptionPlan.PRO_ANUAL;
-    else if (planValue === 'PLUS_ANUAL' || planValue === 'PLUS_ANUAL')
+    else if (planValue === 'PLUS_ANUAL')
       planCode = SubscriptionPlan.PLUS_ANUAL;
     else planCode = SubscriptionPlan.PLUS;
 
@@ -202,9 +278,25 @@ export class AsaasPaymentService {
     id: string,
     chatId: string,
   ): Promise<{ status: AsaasPaymentStatus; updated: boolean }> {
-    const payment = await this.getPayment(id);
+    let payment: AsaasPayment | null = null;
+
+    if (id.startsWith('sub_')) {
+      try {
+        payment = await this.getPaymentBySubscription(id);
+      } catch (error) {
+        this.logger.warn(`Falha ao buscar pagamento para subscription ${id}`);
+      }
+      if (!payment) {
+        return { status: 'PENDING', updated: false };
+      }
+    } else {
+      payment = await this.getPayment(id);
+    }
+
     const status = this.getPaymentStatus(payment) as AsaasPaymentStatus;
-    const paidAt = ['CONFIRMED', 'RECEIVED'].includes(status) ? this.resolvePaidAt(payment) : null;
+    const paidAt = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status)
+      ? this.resolvePaidAt(payment)
+      : null;
 
     // Apenas atualiza registro, não aplica lógica de assinatura aqui.
     // O Controller que chame o SubscriptionService se precisar aplicar.

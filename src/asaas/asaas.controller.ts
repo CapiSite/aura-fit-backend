@@ -1,9 +1,8 @@
 import { Body, Controller, Get, Headers, Param, Post, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request } from 'express';
-// import { AsaasService } from './asaas.service'; // Removed
 import { CreateCustomerDto } from './dto/create-customer.dto';
-import { CreatePlanPaymentDto, AsaasBillingType } from './dto/create-plan-payment.dto';
+import { AsaasBillingType } from './dto/create-plan-payment.dto';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { UsersService } from '../users/users.service';
@@ -97,6 +96,22 @@ export class AsaasController {
             phone: digits(user.phoneNumber),
           },
     });
+  }
+
+  @Get('subscriptions/:id/pix')
+  @UseGuards(AuthGuard)
+  async getSubscriptionPix(@Req() req: AuthRequest, @Param('id') id: string) {
+    const cpf = req?.user?.cpf;
+    if (!cpf) {
+      throw new HttpException('CPF nÇœo informado', HttpStatus.BAD_REQUEST);
+    }
+
+    const user = await this.usersService.getMeByCpf(cpf);
+    if (!user.asaasSubscriptionId || user.asaasSubscriptionId !== id) {
+      throw new HttpException('Assinatura nÇœo encontrada', HttpStatus.NOT_FOUND);
+    }
+
+    return this.asaasSubscriptionService.getPixForSubscription(id);
   }
 
   /**
@@ -224,6 +239,7 @@ export class AsaasController {
         subscriptionPlan: true,
         subscriptionExpiresAt: true,
         isPaymentActive: true,
+        asaasSubscriptionId: true,
       },
     });
 
@@ -231,21 +247,22 @@ export class AsaasController {
       throw new HttpException('Nenhuma assinatura ativa', HttpStatus.BAD_REQUEST);
     }
 
-    const result = this.asaasSubscriptionService.calculatePlanChange(
+    const result = await this.asaasSubscriptionService.calculatePlanChange(
       userProfile.subscriptionPlan,
       targetPlan as SubscriptionPlan,
-      userProfile.subscriptionExpiresAt,
+      userProfile.asaasSubscriptionId,
     );
 
     const action = result.isDowngrade ? 'DOWNGRADE' : 'UPGRADE';
     const prorataAmount = result.changePrice;
 
     // Formatar descrição amigável
+    const planLabel = String(targetPlan).replace(/_/g, ' ');
     let description = '';
     if (result.isDowngrade) {
-      description = `Seu plano mudará para ${targetPlan} no final do ciclo atual (em ${result.daysRemaining} dias). Nenhuma cobrança será feita agora.`;
+      description = `Seu plano mudará para ${planLabel} no final do ciclo atual (em ${result.daysRemaining} dias). Nenhuma cobrança será feita agora.`;
     } else {
-      description = `Upgrade imediato para ${targetPlan}. Você pagará apenas a diferença proporcional (${prorataAmount > 0 ? 'R$ ' + prorataAmount.toFixed(2) : 'Sem custo'}) pelos ${result.daysRemaining} dias restantes.`;
+      description = `Upgrade imediato para ${planLabel}. Você pagará apenas a diferença proporcional pelos dias restantes.`;
     }
 
     return {
@@ -253,7 +270,8 @@ export class AsaasController {
       prorataAmount,
       nextLink: null,
       description,
-      daysRemaining: result.daysRemaining
+      daysRemaining: result.daysRemaining,
+      nextDueDate: result.nextDueDate,
     };
   }
 
