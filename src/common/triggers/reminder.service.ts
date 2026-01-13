@@ -30,6 +30,30 @@ export class ReminderService {
     this.logger.log(`Reminder transport registered: ${transport.name}`);
   }
 
+  async sendCustomMessage(
+    phoneNumber: string,
+    message: string,
+    opts?: { transportName?: string },
+  ) {
+    if (!this.transports.length) {
+      this.logger.warn('No reminder transports registered; skipping custom message.');
+      return;
+    }
+
+    const targets = opts?.transportName
+      ? this.transports.filter((transport) => transport.name === opts.transportName)
+      : this.transports;
+
+    if (!targets.length) {
+      this.logger.warn(`No reminder transports matched: ${opts?.transportName ?? 'ALL'}`);
+      return;
+    }
+
+    for (const transport of targets) {
+      await transport.send(phoneNumber, message);
+    }
+  }
+
   @Cron('*/15 * * * *', {
     name: 'water-reminder-check',
     timeZone: 'America/Sao_Paulo',

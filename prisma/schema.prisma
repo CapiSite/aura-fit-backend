@@ -8,38 +8,45 @@ datasource db {
 }
 
 model UserProfile {
-  name                         String
-  weight                       Float?
-  height                       Float?
-  activityLevel                String?
-  workType                     String?
-  goals                        String[]
-  dietaryRestrictions          String[]
-  preferences                  String[]
-  allergies                    String[]
-  medicalConditions            String[]
-  medications                  String[]
-  usualMealsPerDay             Int?
-  wakeTime                     String?
-  sleepTime                    String?
-  timezone                     String?
-  caloricTarget                Int?
-  proteinTarget                Int?
-  carbTarget                   Int?
-  fatTarget                    Int?
-  assistantThreadId            String?
-  lastCheckInAt                DateTime?
-  lastWeighInAt                DateTime?
-  notes                        String?
-  createdAt                    DateTime             @default(now())
-  updatedAt                    DateTime             @updatedAt
-  cpf                          String?              @unique
-  isPaymentActive              Boolean              @default(false)
-  lastPaymentAt                DateTime?
-  nextBillingAt                DateTime?
-  subscriptionExpiresAt        DateTime?
-  subscriptionPlan             SubscriptionPlan     @default(FREE)
-  pendingPlan                  SubscriptionPlan? // Plano agendado para próximo ciclo (downgrades)
+  name                  String
+  weight                Float?
+  height                Float?
+  activityLevel         String?
+  workType              String?
+  goals                 String[]
+  dietaryRestrictions   String[]
+  preferences           String[]
+  allergies             String[]
+  medicalConditions     String[]
+  medications           String[]
+  usualMealsPerDay      Int?
+  wakeTime              String?
+  sleepTime             String?
+  timezone              String?
+  caloricTarget         Int?
+  proteinTarget         Int?
+  carbTarget            Int?
+  fatTarget             Int?
+  assistantThreadId     String?
+  lastCheckInAt         DateTime?
+  lastWeighInAt         DateTime?
+  notes                 String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  cpf                   String?           @unique
+  isPaymentActive       Boolean           @default(false)
+  lastPaymentAt         DateTime?
+  nextBillingAt         DateTime?
+  subscriptionExpiresAt DateTime?
+  subscriptionPlan      SubscriptionPlan  @default(FREE)
+  pendingPlan           SubscriptionPlan? // Plano agendado para próximo ciclo (downgrades)
+
+  // Asaas Subscription Fields
+  asaasCustomerId     String? @unique
+  asaasSubscriptionId String? @unique
+  subscriptionStatus  String? // ACTIVE, INACTIVE, OVERDUE
+  subscriptionCycle   String? // MONTHLY, YEARLY
+
   planStyle                    PlanStyle?
   requestsLastReset            DateTime?
   requestsToday                Int                  @default(0)
@@ -103,11 +110,12 @@ model Payment {
   asaasPaymentId        String?          @unique
   bankSlipUrl           String?
   createdAt             DateTime         @default(now())
-  dueDate               DateTime?
-  invoiceUrl            String?
-  pixPayload            String?
-  pixQrCode             String?
-  transactionReceiptUrl String?
+    dueDate               DateTime?
+    invoiceUrl            String?
+    pixPayload            String?
+    pixQrCode             String?
+    pixReminderLastSentAt DateTime?
+    transactionReceiptUrl String?
   userId                Int
   user                  UserProfile      @relation(fields: [userId], references: [id])
 

@@ -181,6 +181,12 @@ export class UsersService {
         addressNumber: true,
         addressComplement: true,
         zipCode: true,
+        // Subscription fields
+        asaasSubscriptionId: true,
+        asaasCustomerId: true,
+        subscriptionStatus: true,
+        subscriptionCycle: true,
+        pendingPlan: true,
       },
     });
     if (!user) throw new NotFoundException('Usuario nao encontrado');
@@ -425,6 +431,14 @@ export class UsersService {
       await this.prisma.$transaction([
         // Deleta os registros de uso de prompts
         this.prisma.promptUsage.deleteMany({
+          where: { userId: user.id },
+        }),
+        // Deleta tokens de reativacao
+        this.prisma.reactivationToken.deleteMany({
+          where: { userId: user.id },
+        }),
+        // Deleta tokens de reset de senha
+        this.prisma.passwordResetToken.deleteMany({
           where: { userId: user.id },
         }),
         // Deleta os pagamentos
