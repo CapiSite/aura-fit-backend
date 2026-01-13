@@ -150,6 +150,33 @@ export class AsaasController {
     return this.asaasPaymentService.checkPaymentStatus(id, user.phoneNumber);
   }
 
+  @Get('payments/:id/pix')
+  @UseGuards(AuthGuard)
+  async getPixByPayment(@Req() req: AuthRequest, @Param('id') id: string) {
+    const cpf = req?.user?.cpf;
+    if (!cpf) {
+      throw new HttpException('CPF nao informado', HttpStatus.BAD_REQUEST);
+    }
+    const user = await this.usersService.getMeByCpf(cpf);
+    const record = await this.prisma.payment.findFirst({
+      where: { userId: user.id, asaasPaymentId: id },
+      select: { id: true, asaasPaymentId: true },
+    });
+    if (!record) {
+      throw new HttpException('Pagamento nao encontrado', HttpStatus.NOT_FOUND);
+    }
+
+    const pix = await this.asaasPaymentService.getPixQrCode(id);
+    if (pix) {
+      await this.prisma.payment.update({
+        where: { id: record.id },
+        data: { pixQrCode: pix.encodedImage, pixPayload: pix.payload },
+      });
+    }
+
+    return { pix };
+  }
+
   @Throttle({ default: { ttl: 60000, limit: 3 } }) // 3 req/min para mudanças de plano
   @UseGuards(AuthGuard, ThrottlerGuard)
   @Post('payments/change-plan')

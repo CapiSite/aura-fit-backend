@@ -24,7 +24,16 @@ export class AsaasWebhookService {
       throw new HttpException('Unauthorized webhook', HttpStatus.UNAUTHORIZED);
     }
 
+    if (!body) {
+      this.logger.warn('Webhook received empty body');
+      return { ok: false };
+    }
+
     const event = body.event;
+    if (!event) {
+      this.logger.warn('Webhook received without event');
+      return { ok: false };
+    }
 
     // 1. Handle Subscription Deletion
     if (event === 'SUBSCRIPTION_DELETED') {
@@ -39,12 +48,58 @@ export class AsaasWebhookService {
       }
     }
 
+    const isPaymentEvent = typeof event === 'string' && event.startsWith('PAYMENT_');
+    if (!isPaymentEvent) {
+      this.logger.debug(`Webhook ignored event: ${event}`);
+      return { ok: true, ignored: true };
+    }
+
     // 2. Handle Payment Events
     const payment = 'payment' in body ? body.payment : body;
-    if (!payment) return { ok: false };
+    if (!payment?.id) {
+      this.logger.warn(`Webhook payment event without payment payload: ${event}`);
+      return { ok: false };
+    }
 
     const status = this.paymentService.getPaymentStatus(payment);
-    if (!['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status)) {
+    const billingType = (payment?.billingType ?? '').toString().toUpperCase();
+    this.logger.debug(
+      `Webhook payment received: event=${event} id=${payment?.id ?? '-'} status=${status} billingType=${billingType}`,
+    );
+    const isConfirmed = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(status);
+
+    if (!isConfirmed) {
+      const isPix = billingType === 'PIX';
+      const shouldPersist = isPix && ['PENDING', 'OVERDUE'].includes(status);
+      if (shouldPersist) {
+        this.logger.debug(
+          `Webhook PIX pending persisted: id=${payment?.id ?? '-'} status=${status}`,
+        );
+        let user =
+          payment.subscription
+            ? await this.prisma.userProfile.findFirst({
+              where: { asaasSubscriptionId: payment.subscription },
+            })
+            : null;
+
+        if (!user && payment.customer) {
+          user = await this.prisma.userProfile.findUnique({
+            where: { asaasCustomerId: payment.customer },
+          });
+        }
+
+        if (user) {
+          await this.paymentService.upsertPaymentRecord({
+            payment,
+            status,
+            plan: user.subscriptionPlan,
+            chatId: user.phoneNumber,
+            paidAt: null,
+          });
+          return { ok: true, pending: true };
+        }
+      }
+
       return { ok: true, ignored: true };
     }
 

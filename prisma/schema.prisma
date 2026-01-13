@@ -110,11 +110,12 @@ model Payment {
   asaasPaymentId        String?          @unique
   bankSlipUrl           String?
   createdAt             DateTime         @default(now())
-  dueDate               DateTime?
-  invoiceUrl            String?
-  pixPayload            String?
-  pixQrCode             String?
-  transactionReceiptUrl String?
+    dueDate               DateTime?
+    invoiceUrl            String?
+    pixPayload            String?
+    pixQrCode             String?
+    pixReminderLastSentAt DateTime?
+    transactionReceiptUrl String?
   userId                Int
   user                  UserProfile      @relation(fields: [userId], references: [id])
 

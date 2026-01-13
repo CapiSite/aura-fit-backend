@@ -4,6 +4,7 @@ import { UsersModule } from '../../users/users.module';
 import { PrismaModule } from '../../prisma_connection/prisma.module';
 import { ReminderService } from './reminder.service';
 import { MorningGreetingService } from './morning-greeting.service';
+import { PixReminderService } from './pix-reminder.service';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { MorningGreetingService } from './morning-greeting.service';
     UsersModule,
     PrismaModule,
   ],
-  providers: [ReminderService, MorningGreetingService],
-  exports: [ReminderService, MorningGreetingService],
+  providers: [ReminderService, MorningGreetingService, PixReminderService],
+  exports: [ReminderService, MorningGreetingService, PixReminderService],
 })
 export class TriggersModule { }
