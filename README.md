@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Prisma-7.0-2D3748?style=for-the-badge&logo=prisma" alt="Prisma" />
   <img src="https://img.shields.io/badge/PostgreSQL-Latest-336791?style=for-the-badge&logo=postgresql" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/dotenvx-1.51-00D894?style=for-the-badge" alt="dotenvx" />
 </p>
 
 <p align="center">
@@ -39,7 +40,8 @@ O **Aura Fit Backend** é uma API RESTful construída com NestJS que alimenta a 
 - 💳 **Pagamentos**: Integração com Asaas para cobranças
 - 📧 **Email**: Sistema de recuperação de senha e reativação de conta
 - 🔐 **Autenticação**: JWT e bcrypt para segurança
-- 📊 **Database**: Prisma ORM com PostgreSQL
+- � **Dotenvx**: Variáveis de ambiente criptografadas para dev e produção
+- �📊 **Database**: Prisma ORM com PostgreSQL
 - 🎯 **Clean Architecture**: Código modular e testável
 
 ---
@@ -183,39 +185,56 @@ npm install
 
 3. **Configure as variáveis de ambiente**
 
-Crie um arquivo `.env` na raiz:
+⚠️ **Este projeto usa dotenvx para criptografia de variáveis de ambiente.**
+
+**Para desenvolvedores novos no projeto:**
+
+Peça as chaves de descriptografia para o líder do time e crie o arquivo `.env.keys`:
+
+```bash
+# .env.keys (NÃO commitar!)
+DOTENV_PRIVATE_KEY_DEVELOPMENT=sua-chave-de-desenvolvimento-aqui
+DOTENV_PRIVATE_KEY_PRODUCTION=sua-chave-de-producao-aqui
+```
+
+Os arquivos `.env.development` e `.env.production` já estão criptografados no repositório.
+
+**Estrutura das variáveis (referência):**
 
 ```env
 # Database
-DATABASE_URL="postgresql://user:password@localhost:5432/aurafit?schema=aura"
+DATABASE_URL="postgresql://user:password@host:port/database"
 
-# JWT
-JWT_SECRET=your-super-secret-key-here
-
-# Google Gemini
-GEMINI_API_KEY=your-gemini-api-key
-
-# OpenAI (opcional)
-OPENAI_API_KEY=your-openai-api-key
-
-# WhatsApp (Z-API)
-WHATSAPP_INSTANCE_ID=your-instance-id
-WHATSAPP_TOKEN=your-token
-WHATSAPP_CLIENT_TOKEN=your-client-token
-
-# Asaas
-ASAAS_API_KEY=your-asaas-api-key
-ASAAS_BASE_URL=https://sandbox.asaas.com/api/v3
-
-# Email (Nodemailer)
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USER=your-email@gmail.com
-EMAIL_PASSWORD=your-app-password
+# OpenAI
+OPENAI_API_KEY="sk-proj-..."
+OPENAI_ASST_ID="asst_..."
+OPENAI_MODEL="gpt-4.1"
 
 # Frontend URL
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL="http://localhost:3000"
+
+# WhatsApp (Z-API)
+ZAPI_INSTANCE_ID="..."
+ZAPI_TOKEN="..."
+ZAPI_CLIENT_TOKEN="..."
+
+# Asaas
+ASAAS_API_KEY="..."
+ASAAS_BASE_URL="https://sandbox.asaas.com/api/v3"
+ASAAS_WEBHOOK_TOKEN="..."
+
+# Auth
+AUTH_SECRET="..."
+PORT=5000
+
+# Email
+EMAIL_HOST="smtp.gmail.com"
+EMAIL_PORT=587
+EMAIL_USER="..."
+EMAIL_PASS="..."
 ```
+
+> 📖 **Documentação completa sobre dotenvx:** Consulte os comandos e uso avançado na seção [Dotenvx](#-dotenvx)
 
 4. **Configure o banco de dados**
 
@@ -449,7 +468,61 @@ aura-fit-backend/
 
 ---
 
-## 🔐 Segurança
+## � Dotenvx
+
+Este projeto utiliza **[dotenvx](https://dotenvx.com/)** para criptografar variáveis de ambiente, garantindo que informações sensíveis (API keys, tokens, credenciais) estejam seguras mesmo no Git.
+
+### **Como Funciona**
+
+- **Arquivos criptografados** (`.env.development` e `.env.production`) **PODEM** ser commitados no Git ✅
+- **Chaves privadas** (`.env.keys`) **NUNCA** devem ser commitadas ❌
+- Cada ambiente tem sua própria chave de criptografia/descriptografia
+
+### **Estrutura de Arquivos**
+
+```
+.env.development        # Criptografado (commitado no Git)
+.env.production         # Criptografado (commitado no Git)
+.env.keys               # Chaves privadas (NÃO commitar!)
+```
+
+### **Para Desenvolvedores Novos**
+
+1. Clone o repositório
+2. Peça as chaves ao líder do time
+3. Crie o arquivo `.env.keys` com as chaves recebidas
+4. Rode `npm run start:dev` normalmente
+
+### **Comandos Úteis**
+
+```bash
+# Ver valores descriptografados (sem salvar)
+npx dotenvx get -f .env.development
+
+# Editar valor específico
+npx dotenvx set KEY=value -f .env.development
+
+# Criptografar novo arquivo ou atualizar
+npx dotenvx encrypt -f .env.development
+```
+
+### **Em Produção**
+
+Configure a variável de ambiente `DOTENV_PRIVATE_KEY_PRODUCTION` no servidor:
+
+```bash
+# Heroku
+heroku config:set DOTENV_PRIVATE_KEY_PRODUCTION=sua-chave-aqui
+
+# Vercel/Netlify
+# Adicione nas configurações de variáveis de ambiente do dashboard
+```
+
+> 📚 **Documentação completa:** [dotenvx.com/docs](https://dotenvx.com/docs)
+
+---
+
+## �🔐 Segurança
 
 ### **Implementações**
 - ✅ **Bcrypt**: Hash de senhas com salt rounds
@@ -463,10 +536,14 @@ aura-fit-backend/
 
 ### **Variáveis Sensíveis**
 Nunca commite:
-- API Keys (Gemini, OpenAI, Z-API, Asaas)
-- DATABASE_URL
-- JWT_SECRET
-- Credenciais de email
+- ❌ `.env.keys` (Chaves de descriptografia dotenvx)
+- ❌ `.env` (se existir arquivo não criptografado)
+- ✅ `.env.development` e `.env.production` (criptografados, PODEM ser commitados)
+
+**Informações sensíveis estão protegidas por:**
+- 🔒 Criptografia dotenvx para arquivos de ambiente
+- 🔐 Bcrypt para senhas de usuários
+- 🔑 JWT para tokens de autenticação
 
 ---
 
