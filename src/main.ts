@@ -1,4 +1,3 @@
-import '@dotenvx/dotenvx/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app/app.module';

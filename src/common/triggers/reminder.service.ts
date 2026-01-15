@@ -10,12 +10,12 @@ export class ReminderService {
   private readonly transports: ReminderTransport[] = [];
   private readonly activeHours = { start: 6, end: 23 };
   private readonly messages = [
-    'Bora beber água antes que a sede vire drama.',
-    'Seu corpo pediu: água. Seu eu futuro agradece.',
-    'Se a vida tá corrida, pelo menos a água não pode faltar.',
-    'Um gole hoje, zero dor de cabeça amanhã.',
-    'Recarrega aí: água é bateria do corpo.',
-    'Água agora. A sua melhor decisão em 3 segundos.'
+    'Bora beber água? Sua meta agradece!💧',
+    'Seu corpo pediu água. Seu eu do futuro agradece.💧',
+    'Se a vida está corrida, pelo menos a água não pode faltar.💧',
+    'Um gole hoje, zero dor de cabeça amanhã.💧',
+    'Recarrega aí: água é a bateria do corpo.💧',
+    'Água agora. A melhor decisão que você vai tomar em 3 segundos.💧'
   ];
 
   constructor(
