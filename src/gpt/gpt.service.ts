@@ -2,8 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma_connection/prisma.service.js';
-import { CreateGptDto } from './dto/create-gpt.dto';
-import { UpdateGptDto } from './dto/update-gpt.dto';
 import { UsersService } from '../users/users.service';
 import { McpService } from '../mcp/mcp.service';
 
