@@ -11,6 +11,8 @@ export class GptService {
   private readonly client: OpenAI | null;
   private readonly model: string;
   private readonly assistantId: string;
+  private readonly AI_DISCLAIMER_MESSAGE =
+    '\n\n\n> ℹ️ _Esta resposta foi gerada por Inteligência Artificial e não substitui o aconselhamento de um profissional de saúde._';
 
   constructor(
     private readonly configService: ConfigService,
@@ -278,12 +280,13 @@ export class GptService {
           }
 
           return (
-            responseMessage ||
-            'Recebi uma resposta, mas sem mensagem para exibir.'
+            (responseMessage ||
+              'Recebi uma resposta, mas sem mensagem para exibir.') +
+            this.AI_DISCLAIMER_MESSAGE
           );
         } catch (jsonError) {
           // Se não for um JSON válido, retorna o texto como está
-          return rawText;
+          return rawText + this.AI_DISCLAIMER_MESSAGE;
         }
       } catch (error) {
         const status = (error as any)?.status;

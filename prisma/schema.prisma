@@ -60,6 +60,8 @@ model UserProfile {
   waterReminderEnabled         Boolean              @default(false)
   waterReminderIntervalMinutes Int?
   waterReminderLastSent        DateTime?
+  conversionAttempts           Int                  @default(0)
+  lastConversionMessageAt      DateTime?
   id                           Int                  @id @unique @default(autoincrement())
   phoneNumber                  String               @unique
   isActive                     Boolean              @default(true)
@@ -110,12 +112,12 @@ model Payment {
   asaasPaymentId        String?          @unique
   bankSlipUrl           String?
   createdAt             DateTime         @default(now())
-    dueDate               DateTime?
-    invoiceUrl            String?
-    pixPayload            String?
-    pixQrCode             String?
-    pixReminderLastSentAt DateTime?
-    transactionReceiptUrl String?
+  dueDate               DateTime?
+  invoiceUrl            String?
+  pixPayload            String?
+  pixQrCode             String?
+  pixReminderLastSentAt DateTime?
+  transactionReceiptUrl String?
   userId                Int
   user                  UserProfile      @relation(fields: [userId], references: [id])
 

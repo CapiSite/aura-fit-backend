@@ -8,6 +8,17 @@ export class MorningGreetingService {
   private readonly logger = new Logger(MorningGreetingService.name);
   private readonly transports: ReminderTransport[] = [];
 
+  // Configurações
+  private readonly CHECK_WINDOW_START_HOUR = 5;
+  private readonly CHECK_WINDOW_END_HOUR = 11;
+  private readonly GREETING_WINDOW_DURATION_MINUTES = 30;
+  private readonly DEFAULT_WAKE_HOUR = 6;
+  private readonly DEFAULT_WAKE_MINUTE = 0;
+  private readonly BATCH_SIZE = 50;
+  private readonly CONCURRENT_SENDS = 5;
+  private readonly MAX_DELAY_BETWEEN_BATCHES_MS = 2000;
+  private readonly DELAY_PER_USER_MS = 50;
+
   private readonly morningMessages = [
     '☀️ Bom dia! Vamos acordar e começar o dia com o pé direito! Como consigo te ajudar hoje?',
     '🌅 Bom dia! Hora de acordar e arrasar! O que você planeja conquistar hoje?',
@@ -19,23 +30,28 @@ export class MorningGreetingService {
     '🎯 Bom dia! Foco e determinação! Mais um dia para alcançar seus objetivos! Posso ajudar em algo?',
   ];
 
-  private sentGreetingsToday = new Set<string>(); // Rastreia quem já recebeu hoje
+  // Rastreamento de envios por dia
+  private sentGreetingsToday = new Set<string>();
   private lastCheckDate: string | null = null;
 
   constructor(private readonly prisma: PrismaService) {
     this.logger.log('MorningGreetingService initialized with cron scheduler');
   }
 
-  registerTransport(transport: ReminderTransport) {
+  registerTransport(transport: ReminderTransport): void {
     this.transports.push(transport);
     this.logger.log(`Morning greeting transport registered: ${transport.name}`);
   }
 
+  /**
+   * Cron job que executa a cada 5 minutos para enviar saudações matinais
+   * Verifica janela de 30min baseada no wakeTime de cada usuário
+   */
   @Cron(CronExpression.EVERY_5_MINUTES, {
     name: 'morning-greeting-check',
     timeZone: 'America/Sao_Paulo',
   })
-  async handleMorningGreetingCron() {
+  async handleMorningGreetingCron(): Promise<void> {
     await this.sendMorningGreetings();
   }
 
@@ -43,14 +59,13 @@ export class MorningGreetingService {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }
 
-  // Calcula janela de 30min baseada no wakeTime do usuario
   private getScheduledWindowForUser(
     userId: number,
     dateKey: string,
-    wakeTime: string | null
+    wakeTime: string | null,
   ): { windowStart: Date; windowEnd: Date } {
-    let baseHour = 6;
-    let baseMinute = 0;
+    let baseHour = this.DEFAULT_WAKE_HOUR;
+    let baseMinute = this.DEFAULT_WAKE_MINUTE;
 
     if (wakeTime) {
       const timeParts = wakeTime.split(':');
@@ -64,26 +79,23 @@ export class MorningGreetingService {
       }
     }
 
-    const WINDOW_DURATION_MINUTES = 30;
-
     const [year, month, day] = dateKey.split('-').map(Number);
     const windowStart = new Date();
     windowStart.setFullYear(year, month - 1, day);
     windowStart.setHours(baseHour, baseMinute, 0, 0);
 
     const windowEnd = new Date(windowStart);
-    windowEnd.setMinutes(windowEnd.getMinutes() + WINDOW_DURATION_MINUTES);
+    windowEnd.setMinutes(windowEnd.getMinutes() + this.GREETING_WINDOW_DURATION_MINUTES);
 
     return { windowStart, windowEnd };
   }
 
-  // Verifica se esta dentro da janela de verificacao (5h-11h)
   private isWithinCheckWindow(now: Date): boolean {
     const hour = now.getHours();
-    return hour >= 5 && hour < 11;
+    return hour >= this.CHECK_WINDOW_START_HOUR && hour < this.CHECK_WINDOW_END_HOUR;
   }
 
-  private async sendMorningGreetings() {
+  private async sendMorningGreetings(): Promise<void> {
     const now = new Date();
     const currentDateKey = this.getCurrentDateKey(now);
 
@@ -131,11 +143,15 @@ export class MorningGreetingService {
         return;
       }
 
-      const eligibleUsers = users.filter(user => {
+      const eligibleUsers = users.filter((user) => {
         if (!user.phoneNumber || !user.isActive) return false;
         if (this.sentGreetingsToday.has(user.phoneNumber)) return false;
 
-        const { windowStart, windowEnd } = this.getScheduledWindowForUser(user.id, currentDateKey, user.wakeTime);
+        const { windowStart, windowEnd } = this.getScheduledWindowForUser(
+          user.id,
+          currentDateKey,
+          user.wakeTime,
+        );
         return now >= windowStart && now <= windowEnd;
       });
 
@@ -146,67 +162,87 @@ export class MorningGreetingService {
 
       this.logger.log(`${eligibleUsers.length} users are eligible for greetings now`);
 
-      const BATCH_SIZE = 50;
-      const CONCURRENT_SENDS = 5;
-      let sentCount = 0;
-      let failedCount = 0;
-
-      for (let i = 0; i < eligibleUsers.length; i += BATCH_SIZE) {
-        const batch = eligibleUsers.slice(i, i + BATCH_SIZE);
-        this.logger.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(eligibleUsers.length / BATCH_SIZE)}`);
-
-        const sendPromises: Promise<void>[] = [];
-
-        for (const user of batch) {
-          const phoneNumber = user.phoneNumber!;
-          const message = this.pickMessage();
-          const { windowStart } = this.getScheduledWindowForUser(user.id, currentDateKey, user.wakeTime);
-
-          const sendTask = this.sendToUser(phoneNumber, message, windowStart)
-            .then(() => {
-              this.sentGreetingsToday.add(phoneNumber);
-              sentCount++;
-            })
-            .catch(error => {
-              this.logger.warn(`Failed to send greeting to ${phoneNumber}`, error);
-              failedCount++;
-            });
-
-          sendPromises.push(sendTask);
-
-          if (sendPromises.length >= CONCURRENT_SENDS) {
-            await Promise.allSettled(sendPromises);
-            sendPromises.length = 0;
-          }
-        }
-
-        // Aguarda promises restantes do lote
-        await Promise.allSettled(sendPromises);
-
-        if (i + BATCH_SIZE < eligibleUsers.length) {
-          const nextBatchSize = Math.min(BATCH_SIZE, eligibleUsers.length - i - BATCH_SIZE);
-          const delay = Math.min(nextBatchSize * 50, 2000);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-
-      this.logger.log(
-        `Morning greetings complete: Sent=${sentCount}, Failed=${failedCount}, Total=${eligibleUsers.length}`
-      );
+      await this.processBatches(eligibleUsers, currentDateKey);
     } catch (error) {
       this.logger.error('Failed to send morning greetings', error as Error);
     }
   }
+
+  private async processBatches(
+    users: Array<{
+      id: number;
+      phoneNumber: string;
+      name: string;
+      wakeTime: string | null;
+      [key: string]: any;
+    }>,
+    dateKey: string,
+  ): Promise<void> {
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < users.length; i += this.BATCH_SIZE) {
+      const batch = users.slice(i, i + this.BATCH_SIZE);
+      const batchNumber = Math.floor(i / this.BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(users.length / this.BATCH_SIZE);
+
+      this.logger.log(`Processing batch ${batchNumber}/${totalBatches}`);
+
+      const sendPromises: Promise<void>[] = [];
+
+      for (const user of batch) {
+        const phoneNumber = user.phoneNumber!;
+        const message = this.pickMessage();
+        const { windowStart } = this.getScheduledWindowForUser(user.id, dateKey, user.wakeTime);
+
+        const sendTask = this.sendToUser(phoneNumber, message, windowStart)
+          .then(() => {
+            this.sentGreetingsToday.add(phoneNumber);
+            sentCount++;
+          })
+          .catch((error) => {
+            this.logger.warn(`Failed to send greeting to ${phoneNumber}`, error);
+            failedCount++;
+          });
+
+        sendPromises.push(sendTask);
+
+        // Controle de concorrência
+        if (sendPromises.length >= this.CONCURRENT_SENDS) {
+          await Promise.allSettled(sendPromises);
+          sendPromises.length = 0;
+        }
+      }
+
+      // Aguarda promises restantes do lote
+      await Promise.allSettled(sendPromises);
+
+      // Delay entre batches
+      if (i + this.BATCH_SIZE < users.length) {
+        const nextBatchSize = Math.min(this.BATCH_SIZE, users.length - i - this.BATCH_SIZE);
+        const delay = Math.min(
+          nextBatchSize * this.DELAY_PER_USER_MS,
+          this.MAX_DELAY_BETWEEN_BATCHES_MS,
+        );
+        await this.sleep(delay);
+      }
+    }
+
+    this.logger.log(
+      `Morning greetings complete: Sent=${sentCount}, Failed=${failedCount}, Total=${users.length}`,
+    );
+  }
+
   private async sendToUser(
     phoneNumber: string,
     message: string,
-    scheduledTime: Date
+    scheduledTime: Date,
   ): Promise<void> {
     for (const transport of this.transports) {
       await transport.send(phoneNumber, message);
       this.logger.log(
         `Greeting sent via ${transport.name} to ${phoneNumber} ` +
-        `(scheduled ${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')})`
+        `(scheduled ${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')})`,
       );
     }
   }
@@ -214,5 +250,9 @@ export class MorningGreetingService {
   private pickMessage(): string {
     const idx = Math.floor(Math.random() * this.morningMessages.length);
     return this.morningMessages[idx] ?? this.morningMessages[0];
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
