@@ -12,8 +12,8 @@ services:
     environment:
       # Node environment
       - NODE_ENV=production
-      # IMPORTANT: Set this in your deployment environment (Docker/Kubernetes)
-      # - DOTENV_PRIVATE_KEY_PRODUCTION=${DOTENV_PRIVATE_KEY_PRODUCTION}
+      # IMPORTANT: Set this environment variable with your production decryption key
+      - DOTENV_PRIVATE_KEY_PRODUCTION=${DOTENV_PRIVATE_KEY_PRODUCTION}
       # All other env vars will be loaded from .env.production via dotenvx
     restart: always
     networks:

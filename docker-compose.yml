@@ -19,7 +19,7 @@ services:
       # Node environment
       - NODE_ENV=development
       # IMPORTANT: Set this environment variable with your development decryption key
-      # - DOTENV_PRIVATE_KEY_DEVELOPMENT=${DOTENV_PRIVATE_KEY_DEVELOPMENT}
+      - DOTENV_PRIVATE_KEY_DEVELOPMENT=${DOTENV_PRIVATE_KEY_DEVELOPMENT}
       # All other env vars will be loaded from .env.development via dotenvx
     env_file:
       - .env.development
