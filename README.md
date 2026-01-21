@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Prisma-7.0-2D3748?style=for-the-badge&logo=prisma" alt="Prisma" />
   <img src="https://img.shields.io/badge/PostgreSQL-Latest-336791?style=for-the-badge&logo=postgresql" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/dotenvx-1.51-00D894?style=for-the-badge" alt="dotenvx" />
 </p>
 
 <p align="center">
@@ -33,13 +34,14 @@ O **Aura Fit Backend** é uma API RESTful construída com NestJS que alimenta a 
 
 ### ✨ Destaques
 
-- 🤖 **IA Integrada**: Google Gemini e OpenAI para respostas inteligentes
+- 🤖 **IA Integrada**: OpenAI para respostas inteligentes
 - 💬 **WhatsApp API**: Integração completa com Z-API
 - ⏰ **Sistema de Triggers**: Notificações automatizadas (bom dia, lembretes de água)
 - 💳 **Pagamentos**: Integração com Asaas para cobranças
 - 📧 **Email**: Sistema de recuperação de senha e reativação de conta
 - 🔐 **Autenticação**: JWT e bcrypt para segurança
-- 📊 **Database**: Prisma ORM com PostgreSQL
+- � **Dotenvx**: Variáveis de ambiente criptografadas para dev e produção
+- �📊 **Database**: Prisma ORM com PostgreSQL
 - 🎯 **Clean Architecture**: Código modular e testável
 
 ---
@@ -83,6 +85,14 @@ Controllers → Services → Repositories → Database
   - Conta desativada
   - Limite de mensagens FREE
 
+### 🧩 **MCP (Model Context Protocol)**
+- **Integração com Agentes de IA**
+  - Expõe ferramentas (`tools`) para consumo por LLMs
+  - Permite leitura e escrita segura de dados
+- **Ferramentas Disponíveis**
+  - `getUserProfile`: Consulta dados completos
+  - `updateUserProfile`: Atualiza métricas, objetivos e preferências
+
 ### ⏰ **Sistema de Triggers Automatizados**
 
 #### **Morning Greeting Service**
@@ -97,7 +107,23 @@ Controllers → Services → Repositories → Database
 - Lembretes personalizados de beber água
 - Intervalos configuráveis por usuário
 - Mensagens motivacionais variadas
-- Horário de funcionamento: 6h-23h
+- Horário de funcionamento: 6h-23h (cada 15min)
+- Batch processing para envio eficiente
+
+#### **Pix Payment Reminder Service**
+- Notifica pagamentos PIX pendentes
+- Verifica vencimentos nos próximos 2 dias
+- Envia 1 vez ao dia (10h)
+- Inclui link direto para pagamento e valor
+- Ignora se já notificou no dia
+
+#### **Subscription Conversion Service**
+- Tenta recuperar usuários com plano FREE vencido
+- Envia mensagens a cada 3 dias (10h)
+- Limite máximo de 3 tentativas por usuário
+- Mensagens persuasivas variadas (copywriting)
+- Rastreamento persistente no banco de dados
+- Cleanup automático de tentativas antigas
 
 ### 👤 **Gestão de Usuários**
 - CRUD completo de perfis
@@ -109,10 +135,11 @@ Controllers → Services → Repositories → Database
 
 ### 💳 **Sistema de Pagamentos (Asaas)**
 - Criação de clientes
-- Geração de cobranças
-- PIX, Boleto, Cartão
-- Webhooks de status de pagamento
-- Atualização automática de assinaturas
+- Geração de cobranças (Assinaturas e Avulsas)
+- PIX, Boleto, Cartão de Crédito
+- Webhooks de status de pagamento (sync automático)
+- Atualização e cancelamento de assinaturas
+- Upgrade/Downgrade de planos (com cálculo de pro-rata)
 
 ### 📧 **Sistema de Email (Nodemailer)**
 - Templates HTML
@@ -135,12 +162,13 @@ Controllers → Services → Repositories → Database
 - **[@prisma/adapter-pg](https://www.prisma.io/docs/orm/overview/databases/postgresql)** - Adapter PostgreSQL
 
 ### **IA & APIs Externas**
-- **[Google Gemini](https://ai.google.dev/)** - IA conversacional
 - **[OpenAI](https://openai.com/)** - GPT Models
 - **[Z-API](https://z-api.io/)** - WhatsApp Business API
 - **[Asaas](https://www.asaas.com/)** - Gateway de pagamentos
+- **[MCP](https://modelcontextprotocol.io/)** - Protocolo de contexto para IA
 
-### **Autenticação & Segurança**
+### **Segurança & Configuração**
+- **[dotenvx](https://dotenvx.com/)** - Gestão avançada de variáveis criptografadas
 - **[bcryptjs](https://www.npmjs.com/package/bcryptjs)** - Hash de senhas
 - **JWT** - JSON Web Tokens
 - **Class Validator** - Validação de DTOs
@@ -183,48 +211,65 @@ npm install
 
 3. **Configure as variáveis de ambiente**
 
-Crie um arquivo `.env` na raiz:
+⚠️ **Este projeto usa dotenvx para criptografia de variáveis de ambiente.**
+
+**Para desenvolvedores novos no projeto:**
+
+Peça as chaves de descriptografia para o líder do time e crie o arquivo `.env.keys`:
+
+```bash
+# .env.keys (NÃO commitar!)
+DOTENV_PRIVATE_KEY_DEVELOPMENT=sua-chave-de-desenvolvimento-aqui
+DOTENV_PRIVATE_KEY_PRODUCTION=sua-chave-de-producao-aqui
+```
+
+Os arquivos `.env.development` e `.env.production` já estão criptografados no repositório.
+
+**Estrutura das variáveis (referência):**
 
 ```env
 # Database
-DATABASE_URL="postgresql://user:password@localhost:5432/aurafit?schema=aura"
+DATABASE_URL="postgresql://user:password@host:port/database"
 
-# JWT
-JWT_SECRET=your-super-secret-key-here
-
-# Google Gemini
-GEMINI_API_KEY=your-gemini-api-key
-
-# OpenAI (opcional)
-OPENAI_API_KEY=your-openai-api-key
-
-# WhatsApp (Z-API)
-WHATSAPP_INSTANCE_ID=your-instance-id
-WHATSAPP_TOKEN=your-token
-WHATSAPP_CLIENT_TOKEN=your-client-token
-
-# Asaas
-ASAAS_API_KEY=your-asaas-api-key
-ASAAS_BASE_URL=https://sandbox.asaas.com/api/v3
-
-# Email (Nodemailer)
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USER=your-email@gmail.com
-EMAIL_PASSWORD=your-app-password
+# OpenAI
+OPENAI_API_KEY="sk-proj-..."
+OPENAI_ASST_ID="asst_..."
+OPENAI_MODEL="gpt-4.1"
 
 # Frontend URL
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL="http://localhost:3000"
+
+# WhatsApp (Z-API)
+ZAPI_INSTANCE_ID="..."
+ZAPI_TOKEN="..."
+ZAPI_CLIENT_TOKEN="..."
+
+# Asaas
+ASAAS_API_KEY="..."
+ASAAS_BASE_URL="https://sandbox.asaas.com/api/v3"
+ASAAS_WEBHOOK_TOKEN="..."
+
+# Auth
+AUTH_SECRET="..."
+PORT=5000
+
+# Email
+EMAIL_HOST="smtp.gmail.com"
+EMAIL_PORT=587
+EMAIL_USER="..."
+EMAIL_PASS="..."
 ```
+
+> 📖 **Documentação completa sobre dotenvx:** Consulte os comandos e uso avançado na seção [Dotenvx](#-dotenvx)
 
 4. **Configure o banco de dados**
 
 ```bash
 # Gerar cliente Prisma
-npx prisma generate
+npm run generate
 
 # Executar migrations
-npx prisma migrate dev
+npm run migrate:dev
 
 # (Opcional) Seed de dados iniciais
 npm run seed
@@ -246,23 +291,23 @@ http://localhost:3001
 
 ### **Desenvolvimento**
 ```bash
-npm run start:dev      # Modo watch (hot-reload)
-npm run start:debug    # Modo debug
+npm run start:dev      # Modo watch (hot-reload) com dotenvx
+npm run start:debug    # Modo debug com dotenvx
 ```
 
 ### **Build & Produção**
 ```bash
 npm run build          # Build de produção
-npm run start:prod     # Inicia em produção
+npm run start:prod     # Inicia em produção com dotenvx
 ```
 
-### **Database**
+### **Database (IMPORTANTE: Use npm run para carregar .env criptografado)**
 ```bash
-npx prisma generate           # Gera Prisma Client
-npx prisma migrate dev        # Cria nova migration
-npx prisma migrate deploy     # Aplica migrations (prod)
-npx prisma studio             # Interface visual do DB
-npm run seed                  # Seed de admin
+npm run generate             # Gera Prisma Client (+dotenvx)
+npm run migrate:dev          # Cria nova migration (+dotenvx)
+npm run migrate:deploy       # Aplica migrations prod (+dotenvx)
+npx prisma studio            # Interface visual do DB (precisa de .env descriptografado local)
+npm run seed                 # Seed de admin (+dotenvx)
 ```
 
 ### **Testes**
@@ -287,14 +332,15 @@ npm run format         # Prettier
 ```http
 POST   /auth/register              # Registrar usuário
 POST   /auth/login                 # Login
-POST   /auth/forgot-password       # Recuperar senha
-POST   /auth/reset-password        # Redefinir senha
-POST   /auth/reactivate            # Reativar conta
+POST   /auth/forgot-password       # Solicitar recuperação de senha
+POST   /auth/reset-password        # Redefinir senha (com token)
+POST   /auth/request-reactivation  # Solicitar reativação de conta
+POST   /auth/confirm-reactivation  # Confirmar reativação (com token)
 ```
 
 ### **Usuários**
 ```http
-GET    /users/profile              # Perfil do usuário
+GET    /users/profile              # Perfil do usuário logado
 PUT    /users/profile              # Atualizar perfil
 GET    /users/:id                  # Buscar usuário (admin)
 DELETE /users/:id                  # Deletar usuário (admin)
@@ -302,24 +348,36 @@ DELETE /users/:id                  # Deletar usuário (admin)
 
 ### **WhatsApp**
 ```http
-POST   /whatsapp/webhook           # Receber mensagens
-GET    /whatsapp/qr-code           # Obter QR Code
-POST   /whatsapp/send              # Enviar mensagem
-GET    /whatsapp/messages/:phone   # Histórico de mensagens
+POST   /whatsapp/webhook           # Webhook (recebe mensagens)
+GET    /whatsapp/qr                # Obter QR Code (base64)
+POST   /whatsapp                   # Enviar mensagem texto/midia
 ```
 
 ### **Pagamentos (Asaas)**
 ```http
-POST   /asaas/create-customer      # Criar cliente
-POST   /asaas/create-charge        # Criar cobrança
-POST   /asaas/webhook              # Webhook de status
-GET    /asaas/payment/:id          # Status do pagamento
+POST   /asaas/customers                    # Criar cliente no Asaas
+POST   /asaas/subscriptions/create         # Criar assinatura (Cartão/PIX)
+POST   /asaas/subscriptions/cancel         # Cancelar assinatura
+POST   /asaas/subscriptions/:id/pix        # QR Code PIX da assinatura
+GET    /asaas/payments/:id                 # Status do pagamento
+GET    /asaas/payments/:id/check           # Verificar status e atualizar DB
+GET    /asaas/payments/:id/pix             # QR Code PIX de cobrança avulsa
+POST   /asaas/payments/change-plan         # Mudar plano (Upgrade/Downgrade)
+GET    /asaas/payments/change-plan/preview/:targetPlan  # Simular mudança
+POST   /asaas/webhook                      # Webhook de status
 ```
 
 ### **GPT / IA**
 ```http
 POST   /gpt/chat                   # Conversa com IA
 POST   /gpt/analyze-image          # Análise de imagem
+```
+
+### **MCP (Model Context Protocol)**
+```http
+GET    /mcp/health                 # Health check do MCP
+GET    /mcp/tools                  # Listar ferramentas disponíveis
+POST   /mcp/tools/:name/call       # Executar ferramenta
 ```
 
 ---
@@ -449,7 +507,61 @@ aura-fit-backend/
 
 ---
 
-## 🔐 Segurança
+## � Dotenvx
+
+Este projeto utiliza **[dotenvx](https://dotenvx.com/)** para criptografar variáveis de ambiente, garantindo que informações sensíveis (API keys, tokens, credenciais) estejam seguras mesmo no Git.
+
+### **Como Funciona**
+
+- **Arquivos criptografados** (`.env.development` e `.env.production`) **PODEM** ser commitados no Git ✅
+- **Chaves privadas** (`.env.keys`) **NUNCA** devem ser commitadas ❌
+- Cada ambiente tem sua própria chave de criptografia/descriptografia
+
+### **Estrutura de Arquivos**
+
+```
+.env.development        # Criptografado (commitado no Git)
+.env.production         # Criptografado (commitado no Git)
+.env.keys               # Chaves privadas (NÃO commitar!)
+```
+
+### **Para Desenvolvedores Novos**
+
+1. Clone o repositório
+2. Peça as chaves ao líder do time
+3. Crie o arquivo `.env.keys` com as chaves recebidas
+4. Rode `npm run start:dev` normalmente
+
+### **Comandos Úteis**
+
+```bash
+# Ver valores descriptografados (sem salvar)
+npx dotenvx get -f .env.development
+
+# Editar valor específico
+npx dotenvx set KEY=value -f .env.development
+
+# Criptografar novo arquivo ou atualizar
+npx dotenvx encrypt -f .env.development
+```
+
+### **Em Produção**
+
+Configure a variável de ambiente `DOTENV_PRIVATE_KEY_PRODUCTION` no servidor:
+
+```bash
+# Heroku
+heroku config:set DOTENV_PRIVATE_KEY_PRODUCTION=sua-chave-aqui
+
+# Vercel/Netlify
+# Adicione nas configurações de variáveis de ambiente do dashboard
+```
+
+> 📚 **Documentação completa:** [dotenvx.com/docs](https://dotenvx.com/docs)
+
+---
+
+## �🔐 Segurança
 
 ### **Implementações**
 - ✅ **Bcrypt**: Hash de senhas com salt rounds
@@ -463,10 +575,14 @@ aura-fit-backend/
 
 ### **Variáveis Sensíveis**
 Nunca commite:
-- API Keys (Gemini, OpenAI, Z-API, Asaas)
-- DATABASE_URL
-- JWT_SECRET
-- Credenciais de email
+- ❌ `.env.keys` (Chaves de descriptografia dotenvx)
+- ❌ `.env` (se existir arquivo não criptografado)
+- ✅ `.env.development` e `.env.production` (criptografados, PODEM ser commitados)
+
+**Informações sensíveis estão protegidas por:**
+- 🔒 Criptografia dotenvx para arquivos de ambiente
+- 🔐 Bcrypt para senhas de usuários
+- 🔑 JWT para tokens de autenticação
 
 ---
 

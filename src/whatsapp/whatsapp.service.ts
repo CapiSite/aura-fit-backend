@@ -14,6 +14,7 @@ import { GptService } from '../gpt/gpt.service';
 import { PrismaService } from '../prisma_connection/prisma.service';
 import { ReminderService } from 'src/common/triggers/reminder.service';
 import { MorningGreetingService } from 'src/common/triggers/morning-greeting.service';
+import { ConversionService } from 'src/common/triggers/conversion.service';
 
 type ZapiSendTextResponse = { zaapId: string; messageId: string };
 
@@ -39,6 +40,7 @@ export class WhatsappService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly reminderService: ReminderService,
     private readonly morningGreetingService: MorningGreetingService,
+    private readonly conversionService: ConversionService,
   ) {
     this.instanceId =
       this.configService.get<string>('whatsapp.instanceId') ?? '';
@@ -63,6 +65,16 @@ export class WhatsappService implements OnModuleInit {
 
     // Registra WhatsApp como transport para mensagens matinais
     this.morningGreetingService.registerTransport({
+      name: 'WhatsApp',
+      send: async (phoneNumber, message) => {
+        const phone = this.normalizePhone(phoneNumber);
+        if (!phone) return;
+        await this.sendText({ phone, message });
+      },
+    });
+
+    // Registra WhatsApp como transport para mensagens de conversão
+    this.conversionService.registerTransport({
       name: 'WhatsApp',
       send: async (phoneNumber, message) => {
         const phone = this.normalizePhone(phoneNumber);
