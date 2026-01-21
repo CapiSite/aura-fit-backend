@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Environment files (will be copied explicitly in Dockerfile)
+# .env*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+*.test.ts
+*.spec.ts
+test/
+
+# Documentation
+*.md
+!README.md
+
+# Misc
+.prettierrc
+.eslintrc*
+eslint.config.mjs
+tsconfig*.json
+!tsconfig.json
+jest.config.js
