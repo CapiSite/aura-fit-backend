@@ -82,15 +82,17 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
-# Install dotenvx globally for production runtime
-RUN npm install -g @dotenvx/dotenvx
+# Install dotenvx, ts-node and typescript globally for production runtime
+RUN npm install -g @dotenvx/dotenvx ts-node typescript
 
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 
-# Copy Prisma schema and migrations for runtime
+# Copy Prisma schema, config and migrations for runtime
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./
+COPY --from=build /app/tsconfig.json ./
 
 # Copy encrypted environment files (will be decrypted using DOTENV_PRIVATE_KEY_PRODUCTION)
 COPY .env.production ./
