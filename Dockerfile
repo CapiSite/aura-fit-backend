@@ -100,5 +100,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD node -e "require('http').get('http://localhost:5000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Start production server with dotenvx
-CMD ["sh", "-c", "dotenvx run --env-file=.env.production -- /usr/local/bin/node dist/main.js"]
+# Start production server with dotenvx (run migrations first, then start app)
+CMD ["sh", "-c", "dotenvx run --env-file=.env.production -- sh -c 'npx prisma migrate deploy && node dist/main.js'"]
