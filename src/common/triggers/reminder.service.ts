@@ -94,10 +94,8 @@ export class ReminderService {
         where: {
           waterReminderEnabled: true,
           waterReminderIntervalMinutes: { not: null },
-          OR: [
-            { subscriptionExpiresAt: { gt: now } },
-            { isPaymentActive: true },
-          ],
+          subscriptionExpiresAt: { gt: now },
+          isActive: true,
         },
         select: {
           id: true,

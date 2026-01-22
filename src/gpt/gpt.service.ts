@@ -304,7 +304,7 @@ export class GptService {
         }
 
         this.logger.error('Erro ao gerar resposta', error as Error);
-        return 'Aguarde um momento e tente novamente.';
+        return 'Estamos quase lá. Aguarde só um pouquinho.';
       }
     }
 

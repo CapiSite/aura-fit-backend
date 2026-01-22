@@ -26,9 +26,13 @@ RUN npm ci
 # ========================================
 FROM dependencies AS build
 
-# Set placeholder DATABASE_URL for Prisma generate (required at build time)
-# The real DATABASE_URL will be loaded from .env.* files at runtime via dotenvx
+# Install NestJS CLI globally for build stage
+RUN npm install -g @nestjs/cli
+
+# Set placeholder URLs for Prisma generate (required at build time)
+# The real URLs will be loaded from .env.* files at runtime via dotenvx
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
+ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
 
 # Copy source code
 COPY . .
@@ -44,9 +48,10 @@ RUN npm run build
 # ========================================
 FROM dependencies AS development
 
-# Set placeholder DATABASE_URL for Prisma generate (required at build time)
-# The real DATABASE_URL will be loaded from .env.development at runtime via dotenvx
+# Set placeholder URLs for Prisma generate (required at build time)
+# The real URLs will be loaded from .env.development at runtime via dotenvx
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
+ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
 
 # Copy source code
 COPY . .
@@ -58,7 +63,7 @@ RUN npx prisma generate
 COPY .env.development ./
 
 # Expose port
-EXPOSE 5000
+EXPOSE 3000
 
 # Start development server with hot-reload
 CMD ["npm", "run", "start:dev"]
@@ -77,22 +82,27 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
+# Install dotenvx, ts-node and typescript globally for production runtime
+RUN npm install -g @dotenvx/dotenvx ts-node typescript
+
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 
-# Copy Prisma schema and migrations for runtime
+# Copy Prisma schema, config and migrations for runtime
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./
+COPY --from=build /app/tsconfig.json ./
 
 # Copy encrypted environment files (will be decrypted using DOTENV_PRIVATE_KEY_PRODUCTION)
 COPY .env.production ./
 
 # Expose port
-EXPOSE 5000
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+    CMD node -e "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Start production server
-CMD ["npm", "run", "start:prod"]
+# Start production server with dotenvx (run migrations first, then start app)
+CMD ["sh", "-c", "dotenvx run --env-file=.env.production -- npx prisma migrate deploy && dotenvx run --env-file=.env.production -- node dist/src/main.js"]

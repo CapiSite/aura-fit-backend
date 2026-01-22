@@ -91,7 +91,14 @@ export class MorningGreetingService {
   }
 
   private isWithinCheckWindow(now: Date): boolean {
-    const hour = now.getHours();
+    // Extrai a hora no timezone de São Paulo usando Intl.DateTimeFormat
+    const formatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: 'numeric',
+      hour12: false,
+    });
+
+    const hour = parseInt(formatter.format(now));
     return hour >= this.CHECK_WINDOW_START_HOUR && hour < this.CHECK_WINDOW_END_HOUR;
   }
 
@@ -121,10 +128,8 @@ export class MorningGreetingService {
     try {
       const users = await this.prisma.userProfile.findMany({
         where: {
-          OR: [
-            { subscriptionExpiresAt: { gt: now } },
-            { isPaymentActive: true },
-          ],
+          subscriptionExpiresAt: { gt: now },
+          isActive: true,
         },
         select: {
           id: true,

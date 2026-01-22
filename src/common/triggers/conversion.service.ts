@@ -9,10 +9,12 @@ export class ConversionService {
   private readonly transports: ReminderTransport[] = [];
 
   // Configurações
-  private readonly MAX_CONVERSION_ATTEMPTS = 3;
+  private readonly MAX_CONVERSION_ATTEMPTS = 2;
   private readonly DAYS_BETWEEN_ATTEMPTS = 3;
   private readonly BATCH_SIZE = 50;
   private readonly CONCURRENT_SENDS = 5;
+  private readonly DELAY_PER_MESSAGE_MS = 200;
+  private readonly DELAY_PER_USER_MS = 500;
 
   private readonly conversionMessages = [
     '👋 Olá! Notamos que seu período de teste terminou. Que tal conhecer nossos planos pagos? Temos opções que vão te ajudar a alcançar seus objetivos! 💪\n\nAcesse: https://aurafit.ia.br',
@@ -35,11 +37,7 @@ export class ConversionService {
     this.logger.log(`Conversion transport registered: ${transport.name}`);
   }
 
-  /**
-   * Cron job que executa a cada 3 dias às 10h (horário de Brasília)
-   * Formato: segundo minuto hora dia mês dia-da-semana
-   */
-  @Cron('0 0 10 */3 * *', {
+  @Cron('0 0 08 * * *', {
     name: 'conversion-reminder-check',
     timeZone: 'America/Sao_Paulo',
   })
@@ -175,6 +173,9 @@ export class ConversionService {
 
         sendPromises.push(sendTask);
 
+        // Delay individual entre mensagens para evitar rate limiting
+        await this.sleep(this.DELAY_PER_MESSAGE_MS);
+
         // Controle de concorrência
         if (sendPromises.length >= this.CONCURRENT_SENDS) {
           await Promise.allSettled(sendPromises);
@@ -191,7 +192,7 @@ export class ConversionService {
           this.BATCH_SIZE,
           users.length - i - this.BATCH_SIZE,
         );
-        const delay = Math.min(nextBatchSize * 100, 3000);
+        const delay = Math.min(nextBatchSize * this.DELAY_PER_USER_MS, 10000); // 500ms por usuário, máx 10s
         await this.sleep(delay);
       }
     }
