@@ -29,9 +29,10 @@ FROM dependencies AS build
 # Install NestJS CLI globally for build stage
 RUN npm install -g @nestjs/cli
 
-# Set placeholder DATABASE_URL for Prisma generate (required at build time)
-# The real DATABASE_URL will be loaded from .env.* files at runtime via dotenvx
+# Set placeholder URLs for Prisma generate (required at build time)
+# The real URLs will be loaded from .env.* files at runtime via dotenvx
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
+ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
 
 # Copy source code
 COPY . .
@@ -47,9 +48,10 @@ RUN npm run build
 # ========================================
 FROM dependencies AS development
 
-# Set placeholder DATABASE_URL for Prisma generate (required at build time)
-# The real DATABASE_URL will be loaded from .env.development at runtime via dotenvx
+# Set placeholder URLs for Prisma generate (required at build time)
+# The real URLs will be loaded from .env.development at runtime via dotenvx
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
+ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
 
 # Copy source code
 COPY . .
