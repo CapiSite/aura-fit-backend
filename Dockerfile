@@ -80,6 +80,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
+# Install dotenvx globally for production runtime
+RUN npm install -g @dotenvx/dotenvx
+
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
