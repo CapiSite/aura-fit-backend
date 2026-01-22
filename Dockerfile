@@ -33,6 +33,9 @@ RUN npm install -g @nestjs/cli
 # The real DATABASE_URL will be loaded from .env.* files at runtime via dotenvx
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=aura"
 
+# Copy TypeScript config files
+COPY tsconfig.json tsconfig.build.json ./
+
 # Copy source code
 COPY . .
 
