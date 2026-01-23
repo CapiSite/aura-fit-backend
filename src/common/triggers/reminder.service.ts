@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ReminderTransport } from './reminder-transport.interface';
-import { UsersService } from '../../users/users.service';
 import { PrismaService } from '../../prisma_connection/prisma.service';
+import { TimezoneService } from '../services/timezone.service';
 
 @Injectable()
 export class ReminderService {
@@ -25,8 +25,8 @@ export class ReminderService {
   ];
 
   constructor(
-    private readonly usersService: UsersService,
     private readonly prisma: PrismaService,
+    private readonly timezoneService: TimezoneService,
   ) {
     this.logger.log('ReminderService initialized with cron scheduler');
   }
@@ -72,9 +72,12 @@ export class ReminderService {
     await this.sendWaterReminders();
   }
 
-  private isWithinActiveWindow(now: Date): boolean {
-    const hour = now.getHours();
-    return hour >= this.ACTIVE_HOURS_START && hour <= this.ACTIVE_HOURS_END;
+  private isWithinActiveWindow(now: Date = new Date()): boolean {
+    return this.timezoneService.isWithinHourRange(
+      this.ACTIVE_HOURS_START,
+      this.ACTIVE_HOURS_END,
+      now,
+    );
   }
 
   private async sendWaterReminders(): Promise<void> {

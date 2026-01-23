@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ReminderTransport } from './reminder-transport.interface';
 import { PrismaService } from '../../prisma_connection/prisma.service';
+import { TimezoneService } from '../services/timezone.service';
 
 @Injectable()
 export class MorningGreetingService {
@@ -34,7 +35,10 @@ export class MorningGreetingService {
   private sentGreetingsToday = new Set<string>();
   private lastCheckDate: string | null = null;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly timezoneService: TimezoneService,
+  ) {
     this.logger.log('MorningGreetingService initialized with cron scheduler');
   }
 
@@ -55,56 +59,48 @@ export class MorningGreetingService {
     await this.sendMorningGreetings();
   }
 
-  private getCurrentDateKey(now: Date): string {
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  /**
+   * Verifica se o horário atual está dentro da janela de envio do usuário
+   * baseado no wakeTime configurado (janela de 30 minutos após wakeTime)
+   */
+  private isWithinUserWindow(wakeTime: string | null, now: Date = new Date()): boolean {
+    const { hour: wakeHour, minute: wakeMinute } = this.timezoneService.parseTimeString(
+      wakeTime,
+      this.DEFAULT_WAKE_HOUR,
+      this.DEFAULT_WAKE_MINUTE,
+    );
+
+    return this.timezoneService.isWithinTimeWindow(
+      wakeHour,
+      wakeMinute,
+      this.GREETING_WINDOW_DURATION_MINUTES,
+      now,
+    );
   }
 
-  private getScheduledWindowForUser(
-    userId: number,
-    dateKey: string,
-    wakeTime: string | null,
-  ): { windowStart: Date; windowEnd: Date } {
-    let baseHour = this.DEFAULT_WAKE_HOUR;
-    let baseMinute = this.DEFAULT_WAKE_MINUTE;
-
-    if (wakeTime) {
-      const timeParts = wakeTime.split(':');
-      if (timeParts.length === 2) {
-        const hour = parseInt(timeParts[0], 10);
-        const minute = parseInt(timeParts[1], 10);
-        if (!isNaN(hour) && !isNaN(minute) && hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
-          baseHour = hour;
-          baseMinute = minute;
-        }
-      }
-    }
-
-    const [year, month, day] = dateKey.split('-').map(Number);
-    const windowStart = new Date();
-    windowStart.setFullYear(year, month - 1, day);
-    windowStart.setHours(baseHour, baseMinute, 0, 0);
-
-    const windowEnd = new Date(windowStart);
-    windowEnd.setMinutes(windowEnd.getMinutes() + this.GREETING_WINDOW_DURATION_MINUTES);
-
-    return { windowStart, windowEnd };
+  /**
+   * Verifica se estamos dentro da janela geral de verificação (5h-11h)
+   */
+  private isWithinCheckWindow(now: Date = new Date()): boolean {
+    const currentHour = this.timezoneService.getCurrentHour(now);
+    return currentHour >= this.CHECK_WINDOW_START_HOUR && currentHour < this.CHECK_WINDOW_END_HOUR;
   }
 
-  private isWithinCheckWindow(now: Date): boolean {
-    // Extrai a hora no timezone de São Paulo usando Intl.DateTimeFormat
-    const formatter = new Intl.DateTimeFormat('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      hour: 'numeric',
-      hour12: false,
-    });
-
-    const hour = parseInt(formatter.format(now));
-    return hour >= this.CHECK_WINDOW_START_HOUR && hour < this.CHECK_WINDOW_END_HOUR;
+  /**
+   * Formata o horário de acordar para log
+   */
+  private formatWakeTimeForLog(wakeTime: string | null): string {
+    const { hour, minute } = this.timezoneService.parseTimeString(
+      wakeTime,
+      this.DEFAULT_WAKE_HOUR,
+      this.DEFAULT_WAKE_MINUTE,
+    );
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   }
 
   private async sendMorningGreetings(): Promise<void> {
     const now = new Date();
-    const currentDateKey = this.getCurrentDateKey(now);
+    const currentDateKey = this.timezoneService.getCurrentDateKey(now);
 
     this.logger.debug(`Checking morning greetings at ${now.toISOString()}`);
 
@@ -116,7 +112,8 @@ export class MorningGreetingService {
     }
 
     if (!this.isWithinCheckWindow(now)) {
-      this.logger.debug(`Outside check window (current hour: ${now.getHours()}). Skipping.`);
+      const currentHour = this.timezoneService.getCurrentHour(now);
+      this.logger.debug(`Outside check window (current hour: ${currentHour}). Skipping.`);
       return;
     }
 
@@ -152,12 +149,8 @@ export class MorningGreetingService {
         if (!user.phoneNumber || !user.isActive) return false;
         if (this.sentGreetingsToday.has(user.phoneNumber)) return false;
 
-        const { windowStart, windowEnd } = this.getScheduledWindowForUser(
-          user.id,
-          currentDateKey,
-          user.wakeTime,
-        );
-        return now >= windowStart && now <= windowEnd;
+        // Usa o método que compara horários no timezone de São Paulo
+        return this.isWithinUserWindow(user.wakeTime, now);
       });
 
       if (eligibleUsers.length === 0) {
@@ -167,7 +160,7 @@ export class MorningGreetingService {
 
       this.logger.log(`${eligibleUsers.length} users are eligible for greetings now`);
 
-      await this.processBatches(eligibleUsers, currentDateKey);
+      await this.processBatches(eligibleUsers);
     } catch (error) {
       this.logger.error('Failed to send morning greetings', error as Error);
     }
@@ -181,7 +174,6 @@ export class MorningGreetingService {
       wakeTime: string | null;
       [key: string]: any;
     }>,
-    dateKey: string,
   ): Promise<void> {
     let sentCount = 0;
     let failedCount = 0;
@@ -198,9 +190,9 @@ export class MorningGreetingService {
       for (const user of batch) {
         const phoneNumber = user.phoneNumber!;
         const message = this.pickMessage();
-        const { windowStart } = this.getScheduledWindowForUser(user.id, dateKey, user.wakeTime);
+        const wakeTimeFormatted = this.formatWakeTimeForLog(user.wakeTime);
 
-        const sendTask = this.sendToUser(phoneNumber, message, windowStart)
+        const sendTask = this.sendToUser(phoneNumber, message, wakeTimeFormatted)
           .then(() => {
             this.sentGreetingsToday.add(phoneNumber);
             sentCount++;
@@ -241,13 +233,12 @@ export class MorningGreetingService {
   private async sendToUser(
     phoneNumber: string,
     message: string,
-    scheduledTime: Date,
+    wakeTimeFormatted: string,
   ): Promise<void> {
     for (const transport of this.transports) {
       await transport.send(phoneNumber, message);
       this.logger.log(
-        `Greeting sent via ${transport.name} to ${phoneNumber} ` +
-        `(scheduled ${scheduledTime.getHours()}:${String(scheduledTime.getMinutes()).padStart(2, '0')})`,
+        `Greeting sent via ${transport.name} to ${phoneNumber} (wake time: ${wakeTimeFormatted})`,
       );
     }
   }
