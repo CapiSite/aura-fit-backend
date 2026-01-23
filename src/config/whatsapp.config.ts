@@ -4,13 +4,13 @@ const sanitize = (value: string) =>
   value.trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '').replace(/[`\s]/g, '');
 
 export default registerAs('whatsapp', () => {
-  const instanceId = process.env.ZAPI_INSTANCE_ID ? sanitize(process.env.ZAPI_INSTANCE_ID) : '';
-  const token = process.env.ZAPI_TOKEN ? sanitize(process.env.ZAPI_TOKEN) : '';
-  const clientToken = process.env.ZAPI_CLIENT_TOKEN ? sanitize(process.env.ZAPI_CLIENT_TOKEN) : '';
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID ? sanitize(process.env.WHATSAPP_PHONE_NUMBER_ID) : '';
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN ? sanitize(process.env.WHATSAPP_ACCESS_TOKEN) : '';
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN ? sanitize(process.env.WHATSAPP_VERIFY_TOKEN) : '';
 
   return {
-    instanceId,
-    token,
-    clientToken,
+    phoneId,
+    accessToken,
+    verifyToken,
   };
 });

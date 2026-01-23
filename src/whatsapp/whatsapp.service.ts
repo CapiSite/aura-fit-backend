@@ -21,14 +21,16 @@ type ZapiSendTextResponse = { zaapId: string; messageId: string };
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
-  private readonly instanceId: string;
-  private readonly token: string;
-  private readonly clientToken: string;
+  private readonly phoneId: string;
+  private readonly accessToken: string;
+  private readonly verifyToken: string;
+
   private readonly webhookMessages = new Map<string, any[]>();
   private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
   private readonly lastMessageProcessed = new Map<string, number>(); // phone -> timestamp (debounce)
   private readonly lastErrorSent = new Map<string, number>(); // phone -> timestamp
 
+  // Lock file logic maintained for startup message debounce
   private readonly lockFilePath = path.join(
     os.tmpdir(),
     'aura_whatsapp_startup.lock',
@@ -42,12 +44,9 @@ export class WhatsappService implements OnModuleInit {
     private readonly morningGreetingService: MorningGreetingService,
     private readonly conversionService: ConversionService,
   ) {
-    this.instanceId =
-      this.configService.get<string>('whatsapp.instanceId') ?? '';
-    this.token = this.configService.get<string>('whatsapp.token') ?? '';
-    this.clientToken =
-      this.configService.get<string>('whatsapp.clientToken') ?? '';
-
+    this.phoneId = this.configService.get<string>('whatsapp.phoneId') ?? '';
+    this.accessToken = this.configService.get<string>('whatsapp.accessToken') ?? '';
+    this.verifyToken = this.configService.get<string>('whatsapp.verifyToken') ?? '';
   }
 
   async onModuleInit() {
@@ -145,16 +144,6 @@ export class WhatsappService implements OnModuleInit {
         try {
           // Normaliza o telefone para garantir formato correto
           const phone = this.normalizePhone(userPhone);
-
-          // Mensagem de status inicial desativada a pedido do usuario.
-          // await this.sendText({
-          //   phone,
-          //   message:
-          //     'Olá! A Aura está online e pronta para ajudar. Se precisar de algo, é só chamar!',
-          // });
-          // this.logger.log(`Active status message sent to ${phone}`);
-
-          // Pequeno delay para evitar rate limiting
           await new Promise((resolve) => setTimeout(resolve, 1000));
         } catch (err) {
           this.logger.error(
@@ -168,14 +157,14 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private get baseUrl() {
-    return `https://api.z-api.io/instances/${this.instanceId}/token/${this.token}`;
+  private get graphApiUrl() {
+    return `https://graph.facebook.com/v21.0/${this.phoneId}/messages`;
   }
 
   private get headers() {
     return {
       'Content-Type': 'application/json',
-      'Client-Token': this.clientToken,
+      Authorization: `Bearer ${this.accessToken}`,
     };
   }
 
@@ -191,70 +180,10 @@ export class WhatsappService implements OnModuleInit {
     return normalized;
   }
 
-  private normalizeMessagesResponse(payload: any) {
-    if (Array.isArray(payload)) {
-      return payload;
-    }
-
-    if (Array.isArray(payload?.messages)) {
-      return payload.messages;
-    }
-
-    if (Array.isArray(payload?.data)) {
-      return payload.data;
-    }
-
-    return [];
-  }
-
-
   private ensureConfigured() {
-    if (!this.instanceId || !this.token || !this.clientToken) {
-      throw new BadRequestException('Z-API credentials are not configured');
+    if (!this.phoneId || !this.accessToken) {
+      throw new BadRequestException('Meta WhatsApp credentials are not configured');
     }
-  }
-
-  private extractPhoneFromWebhook(payload: WebhookEventDto) {
-    const candidates = [
-      payload?.message?.chatId,
-      payload?.data?.chatId,
-      payload?.body?.chatId,
-      payload?.chatId,
-      payload?.message?.from,
-      payload?.data?.from,
-      payload?.from,
-      payload?.phone,
-    ].filter(Boolean) as string[];
-
-    if (!candidates.length) {
-      return '';
-    }
-
-    const cleaned = candidates[0].replace(/@.+$/, '');
-    return this.normalizePhone(cleaned);
-  }
-
-  private buildMessageKey(
-    phone: string,
-    payload: WebhookEventDto,
-  ): string | null {
-    const candidates = [
-      payload?.messageId,
-      payload?.message?.messageId,
-      payload?.message?.id,
-      payload?.data?.messageId,
-      payload?.data?.id,
-      payload?.body?.messageId,
-      payload?.text?.messageId,
-      payload?.message?.timestamp,
-      payload?.timestamp,
-    ].filter(Boolean) as (string | number)[];
-
-    if (!phone || candidates.length === 0) {
-      return null;
-    }
-
-    return `${phone}:${candidates[0]}`;
   }
 
   private registerMessageKey(key: string) {
@@ -269,6 +198,7 @@ export class WhatsappService implements OnModuleInit {
       }
     }
   }
+
 
 
 
@@ -316,213 +246,238 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async handleWebhook(payload: WebhookEventDto) {
-    const phone = this.extractPhoneFromWebhook(payload);
-    if (phone) {
-      const historical = this.webhookMessages.get(phone) ?? [];
-      this.webhookMessages.set(phone, [...historical, payload]);
-    }
-    console.log('WhatsApp webhook event received', {
-      phone,
-      type: payload?.type,
-      hasMessage: Boolean(payload?.message),
-    });
-
-    const textMessage =
-      payload?.message?.text?.message ||
-      payload?.text?.message ||
-      payload?.message?.caption ||
-      payload?.caption;
-    let imageUrl =
-      payload?.message?.imageUrl || payload?.imageUrl || payload?.image;
-
-    console.log('DEBUG: Raw imageUrl detected:', {
-      type: typeof imageUrl,
-      value: imageUrl,
-      isObject: typeof imageUrl === 'object',
-      hasUrl: imageUrl?.url,
-    });
-
-    if (typeof imageUrl === 'object' && imageUrl?.url) {
-      imageUrl = imageUrl.url;
+    // Meta sends an object with "object": "whatsapp_business_account" and "entry": [...]
+    if (payload.object !== 'whatsapp_business_account') {
+      // Not a whatsapp webhook or just subscription verification
+      return { received: true };
     }
 
-    if (typeof imageUrl === 'object') {
-      console.warn(
-        'DEBUG: imageUrl is still an object, trying to extract string...',
-      );
-      imageUrl = imageUrl?.imageUrl || imageUrl?.link || null;
+    if (!payload.entry || !Array.isArray(payload.entry)) {
+      return { received: true };
     }
 
-    const isFromMe =
-      payload?.message?.fromMe || payload?.fromMe || payload?.data?.fromMe;
+    for (const entry of payload.entry) {
+      const changes = entry.changes;
+      if (!changes || !Array.isArray(changes)) continue;
 
-    if (phone && (textMessage || imageUrl) && !isFromMe) {
-      const messageKey = this.buildMessageKey(phone, payload);
-      if (messageKey) {
-        if (this.processedMessages.has(messageKey)) {
-          console.log('Ignoring duplicated WhatsApp webhook', {
-            phone,
-            messageKey,
-          });
-          return { received: true, duplicated: true };
-        }
-        this.registerMessageKey(messageKey);
-      }
+      for (const change of changes) {
+        if (change.field !== 'messages') continue;
 
-      const phoneNumber = this.tryParseChatId(phone);
-      if (!phoneNumber) {
-        console.log(`Unable to parse phoneNumber from phone: ${phone}`);
-        return { received: true };
-      }
+        const value = change.value;
+        if (!value) continue;
 
-      let user = await this.prisma.userProfile.findUnique({
-        where: { phoneNumber },
-      });
+        const messages = value.messages;
+        if (!messages || !Array.isArray(messages)) continue;
 
-      const senderName =
-        payload?.senderName ||
-        payload?.message?.senderName ||
-        payload?.data?.senderName;
-
-      // Update name if we have a senderName and the current name is the default
-      if (user && senderName && user.name === 'Usuário WhatsApp') {
-        await this.prisma.userProfile.update({
-          where: { phoneNumber },
-          data: { name: senderName },
-        });
-      }
-
-      if (!user) {
-        console.log(
-          `Creating profile for unregistered phone: ${phone}, name: ${senderName}`,
-        );
-        user = await this.ensureUserProfile(phoneNumber, senderName);
-      }
-
-      // Check for plan expiration
-      if (
-        user.subscriptionExpiresAt &&
-        user.subscriptionExpiresAt < new Date()
-      ) {
-        console.log(`Plan expired for user ${phone}`);
-        await this.sendText({
-          phone,
-          message:
-            'Seu plano venceu. Por favor, renove sua assinatura para continuar utilizando o serviço. Link: https://aurafit.ia.br',
-        });
-        return { received: true };
-      }
-
-      // Check if account is active
-      if (!user.isActive) {
-        console.log(`Account deactivated for user ${phone}`);
-        await this.sendText({
-          phone,
-          message:
-            'Sua conta está desativada. Para reativar, faça login novamente no sistema através do site. Link: https://aurafit.ia.br',
-        });
-        return { received: true, accountDeactivated: true };
-      }
-
-      // Debounce simples: ignora mensagens muito rápidas (2 segundos)
-      const now = Date.now();
-      const lastProcessed = this.lastMessageProcessed.get(phone) || 0;
-      const debounceMs = 2000; // 2 segundos
-
-      if (now - lastProcessed < debounceMs) {
-        console.log(
-          `Ignoring message from ${phone} - sent too quickly (within ${debounceMs}ms)`,
-        );
-        return { received: true, ignored: true };
-      }
-
-      // Atualiza timestamp da última mensagem processada
-      this.lastMessageProcessed.set(phone, now);
-
-      console.log(
-        `Processing message from ${phone}: ${textMessage || '[Image]'}`,
-      );
-
-      // Processa a mensagem diretamente
-      try {
-        const response = await this.gptService.generateResponse(
-          textMessage || 'Analise esta imagem',
-          phone,
-          imageUrl,
-        );
-
-        // Se a resposta for uma mensagem de erro, verifica cooldown
-        const isErrorMessage = response.includes('Aguarde um momento') ||
-          response.includes('problema temporário') ||
-          response.includes('dificuldades técnicas');
-
-        if (isErrorMessage) {
-          const lastError = this.lastErrorSent.get(phone) || 0;
-          const errorCooldown = 30 * 1000; // 30 segundos
-
-          if (now - lastError < errorCooldown) {
-            console.log(
-              `Suppressing error message for ${phone} - cooldown active`,
-            );
-            return { received: true };
+        // "contacts" array usually contains the user name
+        const contacts = value.contacts || [];
+        // Dictionary for looking up names by wa_id (phone)
+        const contactMap = new Map<string, string>();
+        for (const contact of contacts) {
+          if (contact.profile?.name) {
+            contactMap.set(contact.wa_id, contact.profile.name);
           }
-
-          this.lastErrorSent.set(phone, now);
         }
 
-        await this.sendText({ phone, message: response });
-      } catch (error) {
-        console.error('Error generating AI response for WhatsApp:', error);
-
-        // Verifica cooldown antes de enviar mensagem de erro genérica
-        const lastError = this.lastErrorSent.get(phone) || 0;
-        const errorCooldown = 30 * 1000;
-
-        if (now - lastError >= errorCooldown) {
-          await this.sendText({
-            phone,
-            message:
-              'Desculpe, tive um problema temporário. Aguarde alguns instantes antes de tentar novamente.',
-          });
-          this.lastErrorSent.set(phone, now);
+        for (const message of messages) {
+          await this.processSingleMessage(message, contactMap);
         }
       }
     }
-
     return { received: true };
   }
 
-  async sendText(dto: CreateWhatsappDto): Promise<ZapiSendTextResponse> {
-    this.ensureConfigured();
-    const res = await fetch(`${this.baseUrl}/send-text`, {
-      method: 'POST',
-      headers: this.headers,
-      body: JSON.stringify({ phone: dto.phone, message: dto.message }),
+  private async processSingleMessage(message: import('./dto/webhook-event.dto').MetaMessage, contactMap: Map<string, string>) {
+    const phoneRaw = message.from; // e.g., "5511999999999"
+    const phone = this.normalizePhone(phoneRaw);
+    if (!phone) return;
+
+    // Ensure we store the entire raw message for history/debugging if needed
+    // In Z-API logical we stored webhookMessages. Here we can simulate it.
+    const historical = this.webhookMessages.get(phone) ?? [];
+    this.webhookMessages.set(phone, [...historical, message]);
+
+    console.log('WhatsApp webhook event received (Meta)', {
+      phone,
+      type: message.type,
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new BadRequestException(text || `Z-API error ${res.status}`);
+
+    // Check message type
+    // Meta types: text, image, audio, etc.
+    // user previous logic prioritized text and images.
+
+    let textMessage: string | null = null;
+    let imageUrl: string | null = null;
+
+    if (message.type === 'text') {
+      textMessage = message.text?.body || null;
+    } else if (message.type === 'image') {
+      textMessage = message.image?.caption || null; // Optional caption
+
     }
-    const result = (await res.json()) as ZapiSendTextResponse;
-    console.log('WhatsApp message sent', {
-      phone: dto.phone,
-      zaapId: result.zaapId,
-      messageId: result.messageId,
-    });
-    return result;
+
+    const messageKey = `${phone}:${message.id}`;
+
+    if (this.processedMessages.has(messageKey)) {
+      console.log('Ignoring duplicated WhatsApp webhook', { phone, messageKey });
+      return;
+    }
+    this.registerMessageKey(messageKey);
+
+    const phoneNumber = this.tryParseChatId(phone);
+    if (!phoneNumber) {
+      console.log(`Unable to parse phoneNumber from phone: ${phone}`);
+      return;
+    }
+
+    // Check sender name
+    const senderName = contactMap.get(phoneRaw);
+
+    let user = await this.prisma.userProfile.findUnique({ where: { phoneNumber } });
+
+    // Update name
+    if (user && senderName && user.name === 'Usuário WhatsApp') {
+      await this.prisma.userProfile.update({
+        where: { phoneNumber },
+        data: { name: senderName },
+      });
+    }
+
+    if (!user) {
+      console.log(`Creating profile for unregistered phone: ${phone}, name: ${senderName}`);
+      user = await this.ensureUserProfile(phoneNumber, senderName);
+    }
+
+    if (user.subscriptionExpiresAt && user.subscriptionExpiresAt < new Date()) {
+      console.log(`Plan expired for user ${phone}`);
+      await this.sendText({
+        phone,
+        message: 'Seu plano venceu. Por favor, renove sua assinatura para continuar utilizando o serviço. Link: https://aurafit.ia.br',
+      });
+      return;
+    }
+
+    // 2. Account Active
+    if (!user.isActive) {
+      console.log(`Account deactivated for user ${phone}`);
+      await this.sendText({
+        phone,
+        message: 'Sua conta está desativada. Para reativar, faça login novamente no sistema através do site. Link: https://aurafit.ia.br',
+      });
+      return;
+    }
+
+    // 3. Debounce
+    const now = Date.now();
+    const lastProcessed = this.lastMessageProcessed.get(phone) || 0;
+    const debounceMs = 2000;
+    if (now - lastProcessed < debounceMs) {
+      console.log(`Ignoring message from ${phone} - sent too quickly`);
+      return;
+    }
+    this.lastMessageProcessed.set(phone, now);
+
+    console.log(`Processing message from ${phone}: ${textMessage || '[Image/Other]'}`);
+
+    // If it's not text and not image, maybe ignore?
+    if (!textMessage && !imageUrl) {
+      // Just ignore
+      return;
+    }
+
+    // 4. GPT Response
+    try {
+      const response = await this.gptService.generateResponse(
+        textMessage || 'Analise esta imagem (Image not supported in migration yet)',
+        phone,
+        imageUrl || undefined,
+      );
+
+      const isErrorMessage = response.includes('Aguarde um momento') ||
+        response.includes('problema temporário') ||
+        response.includes('dificuldades técnicas');
+
+      if (isErrorMessage) {
+        const lastError = this.lastErrorSent.get(phone) || 0;
+        const errorCooldown = 30 * 1000;
+
+        if (now - lastError < errorCooldown) {
+          console.log(`Suppressing error message for ${phone} - cooldown active`);
+          return;
+        }
+        this.lastErrorSent.set(phone, now);
+      }
+
+      await this.sendText({ phone, message: response });
+    } catch (error) {
+      console.error('Error generating AI response for WhatsApp:', error);
+      const lastError = this.lastErrorSent.get(phone) || 0;
+      const errorCooldown = 30 * 1000;
+
+      if (now - lastError >= errorCooldown) {
+        await this.sendText({
+          phone,
+          message:
+            'Desculpe, tive um problema temporário. Aguarde alguns instantes antes de tentar novamente.',
+        });
+        this.lastErrorSent.set(phone, now);
+      }
+    }
   }
 
-  async getQrCodeImage(): Promise<any> {
-    this.ensureConfigured();
-    const res = await fetch(`${this.baseUrl}/qr-code/image`, {
-      method: 'GET',
-      headers: this.headers,
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new BadRequestException(text || `Z-API error ${res.status}`);
+  /**
+   * Verification endpoint for Meta Webhook
+   */
+  verifyWebhook(query: Record<string, string>) {
+    const mode = query['hub.mode'];
+    const token = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === this.verifyToken) {
+      this.logger.log('Webhook verified successfully.');
+      return challenge; // Return plain text challenge
+    } else {
+      throw new BadRequestException('Invalid verification token');
     }
-    return await res.json();
+  }
+
+  /**
+   * Send text message via Meta Graph API
+   */
+  async sendText(dto: CreateWhatsappDto): Promise<any> {
+    this.ensureConfigured();
+
+    const body = {
+      messaging_product: 'whatsapp',
+      to: dto.phone,
+      type: 'text',
+      text: { body: dto.message },
+    };
+
+    try {
+      const res = await fetch(this.graphApiUrl, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        this.logger.error(`Meta API error: ${res.status} - ${text}`);
+        // Log but maybe rethrow friendly?
+        throw new BadRequestException(`Meta API error: ${text}`);
+      }
+
+      const result = await res.json();
+      console.log('WhatsApp message sent (Meta)', {
+        phone: dto.phone,
+        messageId: result?.messages?.[0]?.id,
+      });
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to send message via Meta API', error);
+      throw error;
+    }
   }
 
   async getChatMessages(phone: string): Promise<any> {
