@@ -72,6 +72,13 @@ model UserProfile {
   reactivationTokens           ReactivationToken[]
   passwordResetTokens          PasswordResetToken[]
 
+  nextMorningGreetingAt   DateTime?
+  nextWaterReminderAt     DateTime?
+  nextConversionAttemptAt DateTime?
+
+  @@index([nextMorningGreetingAt])
+  @@index([nextWaterReminderAt])
+  @@index([nextConversionAttemptAt])
   @@map("user_profile")
   @@schema("aura")
 }
@@ -121,6 +128,7 @@ model Payment {
   userId                Int
   user                  UserProfile      @relation(fields: [userId], references: [id])
 
+  @@index([status, dueDate])
   @@map("payment")
   @@schema("aura")
 }
