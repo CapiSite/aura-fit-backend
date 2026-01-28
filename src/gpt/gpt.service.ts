@@ -12,7 +12,7 @@ export class GptService {
   private readonly model: string;
   private readonly assistantId: string;
   private readonly AI_DISCLAIMER_MESSAGE =
-    '\n\n\n> ℹ️ _Esta resposta foi gerada por Inteligência Artificial e não substitui o aconselhamento de um profissional de saúde._';
+    '\n\n\n> ℹ️ _Esta resposta foi gerada por Inteligência Artificial._';
 
   constructor(
     private readonly configService: ConfigService,

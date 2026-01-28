@@ -10,26 +10,21 @@ export class ConversionService {
 
   // Configurações
   private readonly MAX_CONVERSION_ATTEMPTS = 2;
-  private readonly DAYS_BETWEEN_ATTEMPTS = 3;
+  private readonly INTERVALS_DAYS = [3];
   private readonly BATCH_SIZE = 50;
   private readonly CONCURRENT_SENDS = 5;
   private readonly DELAY_PER_MESSAGE_MS = 200;
-  private readonly DELAY_PER_USER_MS = 500;
 
   private readonly conversionMessages = [
     '👋 Olá! Notamos que seu período de teste terminou. Que tal conhecer nossos planos pagos? Temos opções que vão te ajudar a alcançar seus objetivos! 💪\n\nAcesse: https://aurafit.ia.br',
-
     '🌟 Ei! Sentimos sua falta por aqui. Seu plano gratuito expirou, mas você pode continuar aproveitando todos os benefícios com nossos planos Plus ou Pro!\n\nConfira: https://aurafit.ia.br',
-
     '💡 Oi! Vimos que você experimentou a Aura no período gratuito. Gostou da experiência? Assine um plano e continue sua jornada de saúde! 🏃‍♂️\n\nVeja os planos: https://aurafit.ia.br',
-
     '✨ E aí! Seu teste grátis acabou, mas a jornada não precisa terminar aqui. Dá uma olhada nos nossos planos e escolha o que mais combina com você!\n\nAcesse: https://aurafit.ia.br',
-
     '🎯 Olá! Notamos que você não renovou seu plano. Podemos te ajudar a escolher a melhor opção para suas necessidades. Que tal dar uma olhada?\n\nConfira: https://aurafit.ia.br',
   ];
 
   constructor(private readonly prisma: PrismaService) {
-    this.logger.log('ConversionService initialized with cron scheduler');
+    this.logger.log('ConversionService initialized with cron scheduler (Event-Driven)');
   }
 
   registerTransport(transport: ReminderTransport): void {
@@ -42,13 +37,8 @@ export class ConversionService {
     timeZone: 'America/Sao_Paulo',
   })
   async handleConversionReminderCron(): Promise<void> {
-    await this.sendConversionMessages();
-  }
-
-  private async sendConversionMessages(): Promise<void> {
     const now = new Date();
-
-    this.logger.log('Starting conversion message campaign...');
+    this.logger.log('Starting conversion message campaign (Event-Driven)...');
 
     if (!this.transports.length) {
       this.logger.warn('No conversion transports registered; skipping conversion messages.');
@@ -56,90 +46,72 @@ export class ConversionService {
     }
 
     try {
-      // Buscar usuários elegíveis para conversão
-      const eligibleUsers = await this.findEligibleUsers(now);
+      // Busca usuarios elegiveis:
+      // 1. Expirados
+      // 2. Plano FREE
+      // 3. Status Ativo e Pagamento Inativo
+      // 4. Hot path: NextAttempt <= Now (self-healing abaixo)
+      const dueUsers = await this.prisma.userProfile.findMany({
+        where: {
+          isActive: true,
+          isPaymentActive: false,
+          subscriptionPlan: 'FREE',
+          subscriptionExpiresAt: { lt: now },
+          conversionAttempts: { lt: this.MAX_CONVERSION_ATTEMPTS },
+          nextConversionAttemptAt: { lte: now },
+        },
+        take: 100,
+        orderBy: { nextConversionAttemptAt: 'asc' },
+        select: {
+          id: true,
+          phoneNumber: true,
+          name: true,
+          conversionAttempts: true
+        }
+      });
 
-      if (eligibleUsers.length === 0) {
-        this.logger.log('No eligible users found for conversion messages');
+      const availableSlots = 100 - dueUsers.length;
+      let users = dueUsers;
+
+      if (availableSlots > 0) {
+        const selfHealUsers = await this.prisma.userProfile.findMany({
+          where: {
+            isActive: true,
+            isPaymentActive: false,
+            subscriptionPlan: 'FREE',
+            subscriptionExpiresAt: { lt: now },
+            conversionAttempts: 0,
+            nextConversionAttemptAt: null,
+          },
+          take: Math.min(availableSlots, 20),
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            phoneNumber: true,
+            name: true,
+            conversionAttempts: true
+          }
+        });
+
+        users = users.concat(selfHealUsers);
+      }
+
+      if (users.length === 0) {
+        this.logger.log('No eligible users found for conversion messages today');
         return;
       }
 
-      this.logger.log(`Found ${eligibleUsers.length} users eligible for conversion`);
+      this.logger.log(`Found ${users.length} users eligible for conversion`);
 
-      // Filtrar usuários que ainda podem receber mensagens
-      const usersToContact = this.filterByAttemptLimit(eligibleUsers, now);
-
-      if (usersToContact.length === 0) {
-        this.logger.log('All eligible users have reached max conversion attempts');
-        return;
-      }
-
-      this.logger.log(`${usersToContact.length} users will receive conversion messages`);
-
-      // Processar em lotes
-      await this.processBatches(usersToContact, now);
+      await this.processBatches(users, now);
 
     } catch (error) {
       this.logger.error('Failed to send conversion messages', error as Error);
     }
   }
 
-  private async findEligibleUsers(now: Date) {
-    return this.prisma.userProfile.findMany({
-      where: {
-        subscriptionPlan: 'FREE',
-        subscriptionExpiresAt: { lt: now },
-        isPaymentActive: false,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        phoneNumber: true,
-        name: true,
-        subscriptionExpiresAt: true,
-        conversionAttempts: true,
-        lastConversionMessageAt: true,
-      },
-    });
-  }
-
-  private filterByAttemptLimit(
-    users: Array<{
-      id: number;
-      phoneNumber: string;
-      conversionAttempts?: number | null;
-      lastConversionMessageAt?: Date | null;
-      [key: string]: any;
-    }>,
-    now: Date,
-  ) {
-    return users.filter((user) => {
-      if (!user.phoneNumber) return false;
-
-      const attempts = user.conversionAttempts ?? 0;
-
-      // Atingiu limite máximo de tentativas
-      if (attempts >= this.MAX_CONVERSION_ATTEMPTS) {
-        return false;
-      }
-
-      // Primeira tentativa sempre pode ser enviada
-      if (!user.lastConversionMessageAt) {
-        return true;
-      }
-
-      // Verificar se já passou tempo suficiente desde última tentativa
-      const daysSinceLastAttempt = this.getDaysDifference(
-        user.lastConversionMessageAt,
-        now,
-      );
-
-      return daysSinceLastAttempt >= this.DAYS_BETWEEN_ATTEMPTS;
-    });
-  }
-
   private async processBatches(
-    users: Array<{ phoneNumber: string; name?: string;[key: string]: any }>,
+    users: Array<{ id: number; phoneNumber: string; name?: string | null; conversionAttempts: number }>,
     now: Date,
   ): Promise<void> {
     let sentCount = 0;
@@ -147,54 +119,37 @@ export class ConversionService {
 
     for (let i = 0; i < users.length; i += this.BATCH_SIZE) {
       const batch = users.slice(i, i + this.BATCH_SIZE);
-      const batchNumber = Math.floor(i / this.BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(users.length / this.BATCH_SIZE);
-
-      this.logger.log(`Processing batch ${batchNumber}/${totalBatches}`);
-
       const sendPromises: Promise<void>[] = [];
 
       for (const user of batch) {
+
+        if (user.conversionAttempts >= this.MAX_CONVERSION_ATTEMPTS) {
+          continue;
+        }
+
         const message = this.pickMessage();
 
         const sendTask = this.sendToUser(user.phoneNumber, message)
           .then(async () => {
-            await this.updateConversionAttempt(user.id, now);
+            await this.updateUserNextAttempt(user.id, user.conversionAttempts, now);
             sentCount++;
             this.logger.debug(`Conversion message sent to ${user.phoneNumber}`);
           })
-          .catch((error) => {
-            this.logger.warn(
-              `Failed to send conversion message to ${user.phoneNumber}`,
-              error,
-            );
+          .catch(async (error) => {
+            this.logger.warn(`Failed to send conversion message to ${user.phoneNumber}`, error);
             failedCount++;
           });
 
         sendPromises.push(sendTask);
-
-        // Delay individual entre mensagens para evitar rate limiting
         await this.sleep(this.DELAY_PER_MESSAGE_MS);
 
-        // Controle de concorrência
         if (sendPromises.length >= this.CONCURRENT_SENDS) {
           await Promise.allSettled(sendPromises);
           sendPromises.length = 0;
         }
       }
 
-      // Aguarda promises restantes do lote
       await Promise.allSettled(sendPromises);
-
-      // Delay entre batches para evitar sobrecarga
-      if (i + this.BATCH_SIZE < users.length) {
-        const nextBatchSize = Math.min(
-          this.BATCH_SIZE,
-          users.length - i - this.BATCH_SIZE,
-        );
-        const delay = Math.min(nextBatchSize * this.DELAY_PER_USER_MS, 10000); // 500ms por usuário, máx 10s
-        await this.sleep(delay);
-      }
     }
 
     this.logger.log(
@@ -202,31 +157,32 @@ export class ConversionService {
     );
   }
 
-  private async sendToUser(
-    phoneNumber: string,
-    message: string,
-  ): Promise<void> {
-    for (const transport of this.transports) {
-      await transport.send(phoneNumber, message);
-    }
-  }
+  private async updateUserNextAttempt(userId: number, currentAttempts: number, now: Date): Promise<void> {
+    const newAttempts = currentAttempts + 1;
+    let nextDate: Date | null = null;
 
-  private async updateConversionAttempt(
-    userId: number,
-    now: Date,
-  ): Promise<void> {
+    // Se ainda não chegou no limite, agenda a próxima
+    if (newAttempts < this.MAX_CONVERSION_ATTEMPTS) {
+      const daysToAdd = this.INTERVALS_DAYS[currentAttempts] || 7;
+      nextDate = new Date(now);
+      nextDate.setDate(nextDate.getDate() + daysToAdd);
+    }
+
     await this.prisma.userProfile.update({
       where: { id: userId },
       data: {
-        conversionAttempts: { increment: 1 },
+        conversionAttempts: newAttempts,
         lastConversionMessageAt: now,
-      },
+        nextConversionAttemptAt: nextDate
+      }
     });
   }
 
-  private getDaysDifference(date1: Date, date2: Date): number {
-    const msPerDay = 24 * 60 * 60 * 1000;
-    return Math.floor((date2.getTime() - date1.getTime()) / msPerDay);
+  private async sendToUser(phoneNumber: string, message: string): Promise<void> {
+    if (!phoneNumber) throw new Error('Phone number is missing');
+    for (const transport of this.transports) {
+      await transport.send(phoneNumber, message);
+    }
   }
 
   private pickMessage(): string {
@@ -237,5 +193,4 @@ export class ConversionService {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
-
 }

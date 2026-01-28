@@ -28,7 +28,7 @@ export class ReminderService {
     private readonly prisma: PrismaService,
     private readonly timezoneService: TimezoneService,
   ) {
-    this.logger.log('ReminderService initialized with cron scheduler');
+    this.logger.log('ReminderService initialized with cron scheduler (Event-Driven)');
   }
 
   registerTransport(transport: ReminderTransport): void {
@@ -60,27 +60,11 @@ export class ReminderService {
     }
   }
 
-  /**
-   * Cron job que executa a cada 15 minutos para enviar lembretes de água
-   * Apenas durante horário ativo (6h - 23h)
-   */
   @Cron('*/15 * * * *', {
     name: 'water-reminder-check',
     timeZone: 'America/Sao_Paulo',
   })
   async handleWaterRemindersCron(): Promise<void> {
-    await this.sendWaterReminders();
-  }
-
-  private isWithinActiveWindow(now: Date = new Date()): boolean {
-    return this.timezoneService.isWithinHourRange(
-      this.ACTIVE_HOURS_START,
-      this.ACTIVE_HOURS_END,
-      now,
-    );
-  }
-
-  private async sendWaterReminders(): Promise<void> {
     const now = new Date();
 
     if (!this.isWithinActiveWindow(now)) {
@@ -93,32 +77,69 @@ export class ReminderService {
     }
 
     try {
-      const users = await this.prisma.userProfile.findMany({
+      const dueUsers = await this.prisma.userProfile.findMany({
         where: {
           waterReminderEnabled: true,
           waterReminderIntervalMinutes: { not: null },
           subscriptionExpiresAt: { gt: now },
           isActive: true,
+          nextWaterReminderAt: { lte: now },
         },
+        take: 100, // Lote para self-healing gradual
+        orderBy: { nextWaterReminderAt: 'asc' },
         select: {
           id: true,
           phoneNumber: true,
           waterReminderIntervalMinutes: true,
           waterReminderLastSent: true,
+          nextWaterReminderAt: true
         },
       });
 
+      const availableSlots = 100 - dueUsers.length;
+      let users = dueUsers;
+
+      // 2. Self-healing: inicializa apenas uma pequena amostra de NULL quando ha capacidade
+      if (availableSlots > 0) {
+        const selfHealUsers = await this.prisma.userProfile.findMany({
+          where: {
+            waterReminderEnabled: true,
+            waterReminderIntervalMinutes: { not: null },
+            subscriptionExpiresAt: { gt: now },
+            isActive: true,
+            nextWaterReminderAt: null
+          },
+          take: Math.min(availableSlots, 20),
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            phoneNumber: true,
+            waterReminderIntervalMinutes: true,
+            waterReminderLastSent: true,
+            nextWaterReminderAt: true
+          },
+        });
+
+        users = users.concat(selfHealUsers);
+      }
+
       if (users.length === 0) {
-        this.logger.debug('No users with water reminders enabled');
         return;
       }
 
       const message = this.pickMessage();
-
       await this.processBatches(users, now, message);
     } catch (error) {
       this.logger.error('Failed to send water reminders', error as Error);
     }
+  }
+
+  private isWithinActiveWindow(now: Date = new Date()): boolean {
+    return this.timezoneService.isWithinHourRange(
+      this.ACTIVE_HOURS_START,
+      this.ACTIVE_HOURS_END,
+      now,
+    );
   }
 
   private async processBatches(
@@ -127,6 +148,7 @@ export class ReminderService {
       phoneNumber: string;
       waterReminderIntervalMinutes: number | null;
       waterReminderLastSent: Date | null;
+      nextWaterReminderAt: Date | null;
     }>,
     now: Date,
     message: string,
@@ -142,38 +164,51 @@ export class ReminderService {
         const lastSent = user.waterReminderLastSent
           ? new Date(user.waterReminderLastSent)
           : null;
-
         const intervalMs = intervalMinutes * 60 * 1000;
-        if (lastSent && now.getTime() - lastSent.getTime() < intervalMs) {
-          return;
+
+        let sent = false;
+        let shouldSend = true;
+
+        if (!user.nextWaterReminderAt && lastSent) {
+          const timeSinceLast = now.getTime() - lastSent.getTime();
+          if (timeSinceLast < intervalMs) {
+            shouldSend = false;
+          }
         }
 
         const phoneNumber = user.phoneNumber;
-        if (!phoneNumber) return;
-
-        try {
-          for (const transport of this.transports) {
-            await transport.send(phoneNumber, message);
+        if (shouldSend && phoneNumber) {
+          try {
+            for (const transport of this.transports) {
+              await transport.send(phoneNumber, message);
+            }
+            sent = true;
+            sentCount++;
+          } catch (error) {
+            this.logger.warn(`Failed to send water reminder to ${phoneNumber}`, error as Error);
+            failedCount++;
           }
-
-          await this.prisma.userProfile.update({
-            where: { id: user.id },
-            data: { waterReminderLastSent: now },
-          });
-
-          sentCount++;
-        } catch (error) {
-          this.logger.warn(
-            `Failed to send water reminder to ${phoneNumber}`,
-            error as Error,
-          );
-          failedCount++;
         }
+
+        let nextDate = new Date(now.getTime() + intervalMs);
+
+        if (!sent && !user.nextWaterReminderAt && lastSent) {
+          nextDate = new Date(lastSent.getTime() + intervalMs);
+          if (nextDate < now) nextDate = new Date(now.getTime() + intervalMs);
+        }
+
+        await this.prisma.userProfile.update({
+          where: { id: user.id },
+          data: {
+            waterReminderLastSent: sent ? now : undefined,
+            nextWaterReminderAt: nextDate
+          }
+        });
+
       });
 
       await Promise.allSettled(sendPromises);
 
-      // Delay entre batches
       if (i + this.BATCH_SIZE < users.length) {
         await this.sleep(this.DELAY_BETWEEN_BATCHES_MS);
       }

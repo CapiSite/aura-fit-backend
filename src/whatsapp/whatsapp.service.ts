@@ -24,10 +24,13 @@ export class WhatsappService implements OnModuleInit {
   private readonly instanceId: string;
   private readonly token: string;
   private readonly clientToken: string;
-  private readonly webhookMessages = new Map<string, any[]>();
+  private readonly webhookMessages = new Map<string, WebhookEventDto[]>();
   private readonly processedMessages = new Map<string, number>(); // messageKey -> timestamp
-  private readonly lastMessageProcessed = new Map<string, number>(); // phone -> timestamp (debounce)
   private readonly lastErrorSent = new Map<string, number>(); // phone -> timestamp
+  private readonly messageBuffer = new Map<
+    string,
+    { timer: NodeJS.Timeout | null; texts: string[]; imageUrls: string[] }
+  >();
 
   private readonly lockFilePath = path.join(
     os.tmpdir(),
@@ -145,16 +148,6 @@ export class WhatsappService implements OnModuleInit {
         try {
           // Normaliza o telefone para garantir formato correto
           const phone = this.normalizePhone(userPhone);
-
-          // Mensagem de status inicial desativada a pedido do usuario.
-          // await this.sendText({
-          //   phone,
-          //   message:
-          //     'Olá! A Aura está online e pronta para ajudar. Se precisar de algo, é só chamar!',
-          // });
-          // this.logger.log(`Active status message sent to ${phone}`);
-
-          // Pequeno delay para evitar rate limiting
           await new Promise((resolve) => setTimeout(resolve, 1000));
         } catch (err) {
           this.logger.error(
@@ -190,23 +183,6 @@ export class WhatsappService implements OnModuleInit {
     }
     return normalized;
   }
-
-  private normalizeMessagesResponse(payload: any) {
-    if (Array.isArray(payload)) {
-      return payload;
-    }
-
-    if (Array.isArray(payload?.messages)) {
-      return payload.messages;
-    }
-
-    if (Array.isArray(payload?.data)) {
-      return payload.data;
-    }
-
-    return [];
-  }
-
 
   private ensureConfigured() {
     if (!this.instanceId || !this.token || !this.clientToken) {
@@ -270,22 +246,6 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-
-
-  private async isAuthorizedPhone(phone: string): Promise<boolean> {
-    const phoneNumber = this.tryParseChatId(phone);
-    if (!phoneNumber) {
-      return false;
-    }
-
-    const profile = await this.prisma.userProfile.findUnique({
-      where: { phoneNumber },
-      select: { phoneNumber: true },
-    });
-
-    return Boolean(profile);
-  }
-
   private async ensureUserProfile(phoneNumber: string, name?: string) {
     // FREE plan tem 3 dias de teste
     const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
@@ -319,7 +279,12 @@ export class WhatsappService implements OnModuleInit {
     const phone = this.extractPhoneFromWebhook(payload);
     if (phone) {
       const historical = this.webhookMessages.get(phone) ?? [];
-      this.webhookMessages.set(phone, [...historical, payload]);
+      historical.push(payload);
+      // Mantém apenas as últimas 20 mensagens para evitar leak de memória
+      if (historical.length > 20) {
+        historical.shift();
+      }
+      this.webhookMessages.set(phone, historical);
     }
     console.log('WhatsApp webhook event received', {
       phone,
@@ -424,69 +389,100 @@ export class WhatsappService implements OnModuleInit {
         return { received: true, accountDeactivated: true };
       }
 
-      // Debounce simples: ignora mensagens muito rápidas (2 segundos)
-      const now = Date.now();
-      const lastProcessed = this.lastMessageProcessed.get(phone) || 0;
-      const debounceMs = 2000; // 2 segundos
+      // --- INÍCIO BUFFER DE MENSAGENS (User Queue) ---
 
-      if (now - lastProcessed < debounceMs) {
-        console.log(
-          `Ignoring message from ${phone} - sent too quickly (within ${debounceMs}ms)`,
-        );
-        return { received: true, ignored: true };
+      // 1. Limpa timer anterior se houver
+      if (this.messageBuffer.has(phone)) {
+        const entry = this.messageBuffer.get(phone);
+        if (entry?.timer) {
+          clearTimeout(entry.timer);
+        }
       }
 
-      // Atualiza timestamp da última mensagem processada
-      this.lastMessageProcessed.set(phone, now);
+      // 2. Recupera ou cria nova entrada no buffer
+      const currentBuffer = this.messageBuffer.get(phone) || {
+        timer: null,
+        texts: [] as string[],
+        imageUrls: [] as string[],
+      };
 
-      console.log(
-        `Processing message from ${phone}: ${textMessage || '[Image]'}`,
-      );
+      // 3. Adiciona conteúdo atual ao buffer
+      if (textMessage) currentBuffer.texts.push(textMessage);
+      if (imageUrl && typeof imageUrl === 'string') currentBuffer.imageUrls.push(imageUrl);
 
-      // Processa a mensagem diretamente
-      try {
-        const response = await this.gptService.generateResponse(
-          textMessage || 'Analise esta imagem',
-          phone,
-          imageUrl,
+      // 4. Define o timer de disparo (2 segundos)
+      currentBuffer.timer = setTimeout(async () => {
+        // Ao disparar, removemos do map para liberar memória e permitir novos ciclos
+        this.messageBuffer.delete(phone);
+
+        // Junta todas as mensagens de texto
+        const finalMessage = currentBuffer.texts.join('\n');
+        const finalImage =
+          currentBuffer.imageUrls.length > 0
+            ? currentBuffer.imageUrls[currentBuffer.imageUrls.length - 1]
+            : null;
+
+        if (!finalMessage && !finalImage) return;
+
+        console.log(
+          `Processing BUFFERED messages from ${phone}: ${finalMessage} (Img: ${!!finalImage})`,
         );
 
-        // Se a resposta for uma mensagem de erro, verifica cooldown
-        const isErrorMessage = response.includes('Aguarde um momento') ||
-          response.includes('problema temporário') ||
-          response.includes('dificuldades técnicas');
+        try {
+          const response = await this.gptService.generateResponse(
+            finalMessage || 'Analise esta imagem',
+            phone,
+            finalImage || undefined,
+          );
 
-        if (isErrorMessage) {
-          const lastError = this.lastErrorSent.get(phone) || 0;
-          const errorCooldown = 30 * 1000; // 30 segundos
+          const isErrorMessage =
+            response.includes('Aguarde um momento') ||
+            response.includes('problema temporário') ||
+            response.includes('dificuldades técnicas');
 
-          if (now - lastError < errorCooldown) {
-            console.log(
-              `Suppressing error message for ${phone} - cooldown active`,
-            );
-            return { received: true };
+          if (isErrorMessage) {
+            const now = Date.now();
+            const lastError = this.lastErrorSent.get(phone) || 0;
+            // Aumentei cooldown de erro para evitar spam
+            const errorCooldown = 60 * 1000;
+
+            if (now - lastError < errorCooldown) {
+              console.log(
+                `Suppressing error message for ${phone} - cooldown active`,
+              );
+              return;
+            }
+            this.lastErrorSent.set(phone, now);
           }
 
-          this.lastErrorSent.set(phone, now);
+          await this.sendText({ phone, message: response });
+        } catch (error) {
+          console.error('Error generating AI response for WhatsApp:', error);
+          const now = Date.now();
+          const lastError = this.lastErrorSent.get(phone) || 0;
+          const errorCooldown = 60 * 1000;
+
+          if (now - lastError >= errorCooldown) {
+            try {
+              await this.sendText({
+                phone,
+                message:
+                  'Desculpe, tive um problema temporário. Aguarde alguns instantes antes de tentar novamente.',
+              });
+              this.lastErrorSent.set(phone, now);
+            } catch (innerError) {
+              console.error(
+                'Critical: Failed to send error fallback message',
+                innerError,
+              );
+            }
+          }
         }
+      }, 2000); // 2 segundos de inatividade para disparar
 
-        await this.sendText({ phone, message: response });
-      } catch (error) {
-        console.error('Error generating AI response for WhatsApp:', error);
+      this.messageBuffer.set(phone, currentBuffer);
 
-        // Verifica cooldown antes de enviar mensagem de erro genérica
-        const lastError = this.lastErrorSent.get(phone) || 0;
-        const errorCooldown = 30 * 1000;
-
-        if (now - lastError >= errorCooldown) {
-          await this.sendText({
-            phone,
-            message:
-              'Desculpe, tive um problema temporário. Aguarde alguns instantes antes de tentar novamente.',
-          });
-          this.lastErrorSent.set(phone, now);
-        }
-      }
+      return { received: true, buffered: true };
     }
 
     return { received: true };
@@ -512,7 +508,7 @@ export class WhatsappService implements OnModuleInit {
     return result;
   }
 
-  async getQrCodeImage(): Promise<any> {
+  async getQrCodeImage(): Promise<{ type: string; image: string }> {
     this.ensureConfigured();
     const res = await fetch(`${this.baseUrl}/qr-code/image`, {
       method: 'GET',
@@ -522,10 +518,10 @@ export class WhatsappService implements OnModuleInit {
       const text = await res.text();
       throw new BadRequestException(text || `Z-API error ${res.status}`);
     }
-    return await res.json();
+    return (await res.json()) as { type: string; image: string };
   }
 
-  async getChatMessages(phone: string): Promise<any> {
+  async getChatMessages(phone: string): Promise<WebhookEventDto[]> {
     const normalizedPhone = this.normalizePhone(phone);
     const cachedMessages = this.webhookMessages.get(normalizedPhone) ?? [];
     console.log('Serving messages from webhook cache', {
