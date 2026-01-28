@@ -77,19 +77,16 @@ export class ReminderService {
     }
 
     try {
-      // Busca usuários cuja próxima hora de beber água chegou OU que não têm data definida
-      const users = await this.prisma.userProfile.findMany({
+      const dueUsers = await this.prisma.userProfile.findMany({
         where: {
           waterReminderEnabled: true,
           waterReminderIntervalMinutes: { not: null },
           subscriptionExpiresAt: { gt: now },
           isActive: true,
-          OR: [
-            { nextWaterReminderAt: { lte: now } },
-            { nextWaterReminderAt: null }
-          ]
+          nextWaterReminderAt: { lte: now },
         },
         take: 100, // Lote para self-healing gradual
+        orderBy: { nextWaterReminderAt: 'asc' },
         select: {
           id: true,
           phoneNumber: true,
@@ -98,6 +95,33 @@ export class ReminderService {
           nextWaterReminderAt: true
         },
       });
+
+      const availableSlots = 100 - dueUsers.length;
+      let users = dueUsers;
+
+      // 2. Self-healing: inicializa apenas uma pequena amostra de NULL quando ha capacidade
+      if (availableSlots > 0) {
+        const selfHealUsers = await this.prisma.userProfile.findMany({
+          where: {
+            waterReminderEnabled: true,
+            waterReminderIntervalMinutes: { not: null },
+            subscriptionExpiresAt: { gt: now },
+            isActive: true,
+            nextWaterReminderAt: null
+          },
+          take: Math.min(availableSlots, 20),
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            phoneNumber: true,
+            waterReminderIntervalMinutes: true,
+            waterReminderLastSent: true,
+            nextWaterReminderAt: true
+          },
+        });
+
+        users = users.concat(selfHealUsers);
+      }
 
       if (users.length === 0) {
         return;
@@ -145,7 +169,6 @@ export class ReminderService {
         let sent = false;
         let shouldSend = true;
 
-        // Validação adicional para casos de inicialização (null)
         if (!user.nextWaterReminderAt && lastSent) {
           const timeSinceLast = now.getTime() - lastSent.getTime();
           if (timeSinceLast < intervalMs) {
@@ -167,13 +190,10 @@ export class ReminderService {
           }
         }
 
-        // Calcula próxima data
         let nextDate = new Date(now.getTime() + intervalMs);
 
-        // Se era null e não enviamos porque ainda estava cedo:
         if (!sent && !user.nextWaterReminderAt && lastSent) {
           nextDate = new Date(lastSent.getTime() + intervalMs);
-          // Se calculado ficou no passado (bug/atraso), força para agora + intervalo para destravar
           if (nextDate < now) nextDate = new Date(now.getTime() + intervalMs);
         }
 

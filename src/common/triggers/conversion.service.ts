@@ -10,7 +10,7 @@ export class ConversionService {
 
   // Configurações
   private readonly MAX_CONVERSION_ATTEMPTS = 2;
-  private readonly INTERVALS_DAYS = [3, 7]; // Intervalos: T1 (Hoje) -> +3d -> T2 -> +7d (Se houvesse T3)
+  private readonly INTERVALS_DAYS = [3];
   private readonly BATCH_SIZE = 50;
   private readonly CONCURRENT_SENDS = 5;
   private readonly DELAY_PER_MESSAGE_MS = 200;
@@ -46,24 +46,22 @@ export class ConversionService {
     }
 
     try {
-      // Busca usuários elegíveis:
+      // Busca usuarios elegiveis:
       // 1. Expirados
       // 2. Plano FREE
       // 3. Status Ativo e Pagamento Inativo
-      // 4. E (NextAttempt <= Now  OU  NextAttempt is NULL e ainda não tentou 0 vezes)
-      const users = await this.prisma.userProfile.findMany({
+      // 4. Hot path: NextAttempt <= Now (self-healing abaixo)
+      const dueUsers = await this.prisma.userProfile.findMany({
         where: {
           isActive: true,
           isPaymentActive: false,
           subscriptionPlan: 'FREE',
           subscriptionExpiresAt: { lt: now },
-          OR: [
-            { nextConversionAttemptAt: { lte: now } },
-            // Inicialização: Usuários antigos que nunca receberam (attempts=0) e não têm data
-            { nextConversionAttemptAt: null, conversionAttempts: 0 }
-          ]
+          conversionAttempts: { lt: this.MAX_CONVERSION_ATTEMPTS },
+          nextConversionAttemptAt: { lte: now },
         },
-        take: 100, // Limite para segurança e self-healing gradual
+        take: 100,
+        orderBy: { nextConversionAttemptAt: 'asc' },
         select: {
           id: true,
           phoneNumber: true,
@@ -71,6 +69,32 @@ export class ConversionService {
           conversionAttempts: true
         }
       });
+
+      const availableSlots = 100 - dueUsers.length;
+      let users = dueUsers;
+
+      if (availableSlots > 0) {
+        const selfHealUsers = await this.prisma.userProfile.findMany({
+          where: {
+            isActive: true,
+            isPaymentActive: false,
+            subscriptionPlan: 'FREE',
+            subscriptionExpiresAt: { lt: now },
+            conversionAttempts: 0,
+            nextConversionAttemptAt: null,
+          },
+          take: Math.min(availableSlots, 20),
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            phoneNumber: true,
+            name: true,
+            conversionAttempts: true
+          }
+        });
+
+        users = users.concat(selfHealUsers);
+      }
 
       if (users.length === 0) {
         this.logger.log('No eligible users found for conversion messages today');
@@ -99,7 +123,6 @@ export class ConversionService {
 
       for (const user of batch) {
 
-        // Validação extra: Se usuário já tentou MAX vezes (banco inconsistente), ignora
         if (user.conversionAttempts >= this.MAX_CONVERSION_ATTEMPTS) {
           continue;
         }
@@ -108,20 +131,11 @@ export class ConversionService {
 
         const sendTask = this.sendToUser(user.phoneNumber, message)
           .then(async () => {
-            // SUCESSO
             await this.updateUserNextAttempt(user.id, user.conversionAttempts, now);
             sentCount++;
             this.logger.debug(`Conversion message sent to ${user.phoneNumber}`);
           })
           .catch(async (error) => {
-            // FALHA NA MENSAGEM
-            // Opcional: Agendar retry curto? Ou pular e tentar amanhã?
-            // Por simplificação: Mantemos a lógica de agendar a próxima etapa mesmo com falha de envio,
-            // ou mantemos o nextAttemptAt como está para retry no próximo cron?
-            // Melhor: Se falhar o envio (erro de transporte), NÃO atualiza o banco (retry amanhã).
-            // Mas se for número inválido, deveríamos marcar para não tentar mais.
-            // Assumindo erro temporário: não atualiza banco => tenta amanhã (lte: now continua válido)
-
             this.logger.warn(`Failed to send conversion message to ${user.phoneNumber}`, error);
             failedCount++;
           });
@@ -149,12 +163,10 @@ export class ConversionService {
 
     // Se ainda não chegou no limite, agenda a próxima
     if (newAttempts < this.MAX_CONVERSION_ATTEMPTS) {
-      // Pega intervalo baseado na tentativa atual (0->3 dias, 1->7 dias)
       const daysToAdd = this.INTERVALS_DAYS[currentAttempts] || 7;
       nextDate = new Date(now);
       nextDate.setDate(nextDate.getDate() + daysToAdd);
     }
-    // Se chegou no limite, nextDate fica NULL, e conversionAttempts >= MAX impede seleção futura
 
     await this.prisma.userProfile.update({
       where: { id: userId },
